@@ -1,0 +1,4475 @@
+openapi: 3.0.1
+info:
+  title: Bookstore API
+  description: >-
+    API REST de gerenciamento de uma **livraria**: catálogo de livros, clientes
+    do programa de fidelidade, vendas e usuários da plataforma.
+
+
+    ### Convenções
+
+    - **Versionamento:** por URI (`/api/v1`). Sondas de saúde ficam em
+    `/health/*`, sem prefixo.
+
+    - **Formato:** JSON (`application/json`). Datas/timestamps em ISO 8601. IDs
+    dos documentos de negócio são strings geradas pelo Firestore.
+
+    - **Erros:** RFC 9457 (`application/problem+json`) com `type`, `title`,
+    `status`, `detail`, `instance` e, como extensões, `code` (estável, para
+    máquinas) e `invalidParams`.
+
+    - **Paginação:** `page` e `limit` (padrão 1 e 10, máx. 100). Listagens
+    retornam `{ data, meta }`.
+
+    - **Ordenação:** `sort=-createdAt,price` (prefixo `-` = decrescente),
+    restrita a uma lista de campos permitidos.
+
+
+    ### Autenticação e autorização
+
+    - **Login** (`POST /auth/login`) retorna um **access token** JWT (15 min) e
+    um **refresh token** opaco (14 dias).
+
+    - **Renovação** (`POST /auth/refresh`) usa **rotação**: cada refresh token é
+    de uso único; reutilizar um já consumido revoga a sessão inteira.
+
+    - **Autorização:** os campos fornecidos do Firebase não confirmam `role` nem
+    `permissions`. A existência e as regras de autorização devem ser confirmadas
+    na implementação; não são consideradas atributos persistidos.
+
+    - **Rotas públicas:** `/auth/login`, `/auth/refresh` e `/health/*`.
+
+
+    ### Cabeçalhos relevantes
+
+    - `X-Request-Id` (resposta em todas as rotas) e `traceparent` (W3C, opcional
+    na requisição): rastreabilidade.
+
+    - `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset` e
+    `Retry-After`: Token Bucket (capacidade 100, reposição 100/min; cada rota
+    consome 1 a 5 tokens). Excesso → **429**.
+
+    - `ETag` + `If-None-Match` (**304**) e `ETag` + `If-Match` em PATCH
+    (**412**).
+
+    - `Idempotency-Key`: segurança contra duplicidade em `POST /sales`.
+
+
+    ### Observação sobre perfis
+
+    Os perfis `ADMIN` e `SELLER` e suas permissões não foram confirmados nos
+    campos informados do Firebase. Não são documentados como atributos
+    persistidos.
+
+
+    **Persistência documentada:** os registros são armazenados no Firebase/Cloud
+    Firestore. IDs de documentos são strings geradas pelo Firestore, não UUIDs.
+    Timestamps do Firestore são representados na API como strings ISO 8601. Os
+    nomes dos campos da API podem estar em camelCase/inglês, com correspondência
+    documentada aos campos persistidos.
+  version: 1.0.0
+  contact:
+    name: Equipe Bookstore
+  x-revision: v3
+  x-firebase-source-of-truth: >-
+    Os tipos e nomes dos campos persistidos no Cloud Firestore prevalecem sobre
+    os nomes/formatos da API. A API não pressupõe campos não informados.
+  x-apidog-mock-note: >-
+    As regras x-apidog-mock são extensões de Mock por propriedade para
+    importação no Apidog. IDs de documentos Firestore usam strings opacas; não
+    usar @guid para IDs de negócio.
+tags:
+  - name: Auth
+  - name: Users
+  - name: Products
+  - name: Clients
+  - name: Sales
+  - name: Health
+paths:
+  /api/v1/auth/login:
+    post:
+      summary: Autenticar usuário
+      deprecated: false
+      description: >-
+        Autentica com e-mail e senha e retorna um **access token** (JWT, 15 min)
+        e um **refresh token** (opaco, 14 dias, uso único com rotação). Rota
+        pública, com rate limit mais restrito (custo 5 tokens por tentativa). A
+        mensagem de erro não revela se o e-mail existe.
+
+
+        **Custo de rate limit:** 5 tokens (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: login
+      tags:
+        - Auth
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: admin@api.com
+              password: Sup3rS3cr3t!
+        required: true
+      responses:
+        '200':
+          description: Autenticação realizada com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+              example:
+                accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                refreshToken: rt_9f82a1c0d4e5b6a7c8d9e0f1a2b3c4d5
+                tokenType: Bearer
+                expiresIn: 900
+                refreshExpiresIn: 1209600
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          description: Credenciais inválidas.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                type: https://api.bookstore.dev/errors/invalid-credentials
+                title: Credenciais Inválidas
+                status: 401
+                detail: E-mail ou senha incorretos.
+                instance: /api/v1/auth/login
+                code: INVALID_CREDENTIALS
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            WWW-Authenticate:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security: []
+  /api/v1/auth/refresh:
+    post:
+      summary: Renovar tokens (rotação)
+      deprecated: false
+      description: >-
+        Troca um refresh token válido por um **novo par** (access + refresh). O
+        refresh token enviado é invalidado (**uso único**). Se um refresh token
+        **já utilizado** for reapresentado (indício de roubo/replay), toda a
+        família de tokens da sessão é **revogada** e o usuário precisa
+        autenticar novamente. Rota pública.
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: refreshToken
+      tags:
+        - Auth
+      parameters:
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            example:
+              refreshToken: rt_9f82a1c0d4e5b6a7c8d9e0f1a2b3c4d5
+        required: true
+      responses:
+        '200':
+          description: Novo par de tokens emitido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+              example:
+                accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                refreshToken: rt_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d
+                tokenType: Bearer
+                expiresIn: 900
+                refreshExpiresIn: 1209600
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          description: Refresh token inválido, expirado ou reutilizado.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                refresh-token-invalid:
+                  summary: Inválido ou expirado
+                  value:
+                    type: https://api.bookstore.dev/errors/refresh-token-invalid
+                    title: Refresh Token Inválido
+                    status: 401
+                    detail: O refresh token informado é inválido ou expirou.
+                    instance: /api/v1/auth/refresh
+                    code: REFRESH_TOKEN_INVALID
+                refresh-token-reuse-detected:
+                  summary: Reuso detectado
+                  value:
+                    type: >-
+                      https://api.bookstore.dev/errors/refresh-token-reuse-detected
+                    title: Reuso de Refresh Token Detectado
+                    status: 401
+                    detail: >-
+                      Um refresh token já utilizado foi reapresentado. A sessão
+                      foi encerrada por segurança; faça login novamente.
+                    instance: /api/v1/auth/refresh
+                    code: REFRESH_TOKEN_REUSED
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            WWW-Authenticate:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/auth/logout:
+    post:
+      summary: Encerrar sessão
+      deprecated: false
+      description: >-
+        Revoga o refresh token informado e toda a sua família (sessão). O access
+        token atual continua válido até expirar (máx. 15 min), por ser
+        stateless.
+
+
+        **Custo de rate limit:** 1 token (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: logout
+      tags:
+        - Auth
+      parameters:
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            example:
+              refreshToken: rt_9f82a1c0d4e5b6a7c8d9e0f1a2b3c4d5
+        required: true
+      responses:
+        '204':
+          description: Sessão encerrada. Sem corpo na resposta.
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/auth/me:
+    get:
+      summary: Obter usuário autenticado
+      deprecated: false
+      description: >-
+        Retorna o perfil do usuário dono do token (inclui `role`). Útil para o
+        front-end decidir o que exibir; **não** substitui a checagem de
+        permissão no servidor.
+
+
+        **Custo de rate limit:** 1 token (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: getMe
+      tags:
+        - Auth
+      parameters:
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Usuário autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          headers:
+            Cache-Control:
+              example: no-store
+              required: false
+              description: Nunca armazenar.
+              schema:
+                type: string
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/users:
+    get:
+      summary: Listar usuários
+      deprecated: false
+      description: >-
+        Retorna a lista paginada de usuários da coleção `UsuarioAPI`.
+
+
+        **Custo de rate limit:** 2 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: listUsers
+      tags:
+        - Users
+      parameters:
+        - name: page
+          in: query
+          description: Página atual.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Itens por página.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: role
+          in: query
+          description: Filtra por perfil.
+          required: false
+          example: ''
+          schema:
+            type: string
+            enum:
+              - ADMIN
+              - SELLER
+        - name: active
+          in: query
+          description: Filtra por usuários ativos/inativos.
+          required: false
+          example: ''
+          schema:
+            type: boolean
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista paginada de usuários.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUsersResponse'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    post:
+      summary: Criar usuário
+      deprecated: false
+      description: >-
+        Cadastra um novo usuário da API. A senha nunca é retornada.
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: createUser
+      tags:
+        - Users
+      parameters:
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserDTO'
+            example:
+              name: Novo usuário
+              email: novo.usuario@example.com
+              password: SenhaTemporaria123!
+              phone: '16999999999'
+        required: true
+      responses:
+        '201':
+          description: Usuário criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          headers:
+            Location:
+              example: /api/v1/users/SDMXDsjJtqcqK1nWnrk0YjQDqPY2
+              required: false
+              description: URI do recurso criado.
+              schema:
+                type: string
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/users/{id}:
+    get:
+      summary: Obter usuário
+      deprecated: false
+      description: >-
+        Retorna os dados de um usuário.
+
+
+        **Custo de rate limit:** 1 token (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: getUserById
+      tags:
+        - Users
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Usuário encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    patch:
+      summary: Atualizar usuário (parcial)
+      deprecated: false
+      description: >-
+        Atualiza parcialmente os dados do usuário (ex.: desativar com `active:
+        false`).
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta controle de concorrência otimista: envie
+        `If-Match` com o `ETag` lido; se a versão mudou, **412**.
+      operationId: updateUser
+      tags:
+        - Users
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: If-Match
+          in: header
+          description: >-
+            ETag da versão que o cliente leu (controle de concorrência
+            otimista). Se divergir da versão atual, a API responde **412
+            Precondition Failed** e nada é alterado.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserDTO'
+            example:
+              active: false
+        required: true
+      responses:
+        '200':
+          description: Usuário atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+          description: A versão do recurso mudou desde a leitura (`If-Match` não confere).
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/products:
+    get:
+      summary: Listar produtos (livros)
+      deprecated: false
+      description: >-
+        Retorna a lista paginada de livros cadastrados, com filtros e ordenação.
+
+
+        **Custo de rate limit:** 2 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: listProducts
+      tags:
+        - Products
+      parameters:
+        - name: page
+          in: query
+          description: Página atual.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Itens por página.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: search
+          in: query
+          description: Busca textual por título ou autor.
+          required: false
+          example: duna
+          schema:
+            type: string
+        - name: inStock
+          in: query
+          description: Quando `true`, retorna apenas livros com estoque > 0.
+          required: false
+          example: ''
+          schema:
+            type: boolean
+        - name: sort
+          in: query
+          description: >-
+            Ordenação. Prefixo `-` indica ordem decrescente. Campos: `title`,
+            `price`, `stock`, `createdAt`.
+          required: false
+          example: '-createdAt'
+          schema:
+            type: string
+            pattern: >-
+              ^-?(title|price|stock|createdAt)(,-?(title|price|stock|createdAt))*$
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista paginada de produtos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProductsResponse'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    post:
+      summary: Cadastrar produto (livro)
+      deprecated: false
+      description: >-
+        Realiza o cadastro de um novo livro no sistema.
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: createProduct
+      tags:
+        - Products
+      parameters:
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductDTO'
+            example:
+              title: Duna
+              author: Frank Herbert
+              isbn: '9788501101958'
+              code: 0t1E9I47QBhiNZJdnqaf
+              price: 50
+              stock: 5
+        required: true
+      responses:
+        '201':
+          description: Produto criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+          headers:
+            Location:
+              example: /api/v1/products/KIYBXACS6uVj5DbKEsPQ
+              required: false
+              description: URI do recurso criado.
+              schema:
+                type: string
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/products/{id}:
+    get:
+      summary: Obter produto por ID
+      deprecated: false
+      description: >-
+        Busca um livro específico pelo seu identificador do documento no
+        Firestore.
+
+
+        **Custo de rate limit:** 1 token (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: getProductById
+      tags:
+        - Products
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Produto encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    patch:
+      summary: Atualizar produto (parcial)
+      deprecated: false
+      description: >-
+        Atualiza parcialmente os dados de um livro (ex.: apenas o estoque).
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta controle de concorrência otimista: envie
+        `If-Match` com o `ETag` lido; se a versão mudou, **412**.
+      operationId: updateProduct
+      tags:
+        - Products
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: If-Match
+          in: header
+          description: >-
+            ETag da versão que o cliente leu (controle de concorrência
+            otimista). Se divergir da versão atual, a API responde **412
+            Precondition Failed** e nada é alterado.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProductDTO'
+            example:
+              stock: 10
+        required: true
+      responses:
+        '200':
+          description: Produto atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+          description: A versão do recurso mudou desde a leitura (`If-Match` não confere).
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    delete:
+      summary: Remover produto
+      deprecated: false
+      description: >-
+        Exclui o livro especificado. Retorna **409** se o produto estiver
+        vinculado a vendas já registradas.
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: deleteProduct
+      tags:
+        - Products
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Produto removido. Sem corpo na resposta.
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/clients:
+    get:
+      summary: Listar clientes
+      deprecated: false
+      description: >-
+        Retorna a lista paginada de clientes do programa de fidelidade.
+
+
+        **Custo de rate limit:** 2 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: listClients
+      tags:
+        - Clients
+      parameters:
+        - name: page
+          in: query
+          description: Página atual.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Itens por página.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: search
+          in: query
+          description: Busca textual por nome ou e-mail.
+          required: false
+          example: ana
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista paginada de clientes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedClientsResponse'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    post:
+      summary: Cadastrar cliente
+      deprecated: false
+      description: >-
+        Cadastra um novo cliente no programa de fidelidade. Os pontos iniciam em
+        0.
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: createClient
+      tags:
+        - Clients
+      parameters:
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClientDTO'
+            example:
+              name: Ana Souza
+              email: ana.souza@example.com
+              phone: '16988887777'
+              cpf: '52998224725'
+              birthDate: 01/02/2000
+              active: true
+        required: true
+      responses:
+        '201':
+          description: Cliente criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+          headers:
+            Location:
+              example: /api/v1/clients/8NV1c7Q4TCYGcsuPch8I
+              required: false
+              description: URI do recurso criado.
+              schema:
+                type: string
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/clients/{id}:
+    get:
+      summary: Obter cliente por ID
+      deprecated: false
+      description: >-
+        Busca um cliente específico pelo seu identificador do documento no
+        Firestore.
+
+
+        **Custo de rate limit:** 1 token (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: getClientById
+      tags:
+        - Clients
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cliente encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    patch:
+      summary: Atualizar cliente (parcial)
+      deprecated: false
+      description: >-
+        Atualiza parcialmente os dados cadastrais do cliente. Os pontos de
+        fidelidade são alterados apenas por vendas.
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta controle de concorrência otimista: envie
+        `If-Match` com o `ETag` lido; se a versão mudou, **412**.
+      operationId: updateClient
+      tags:
+        - Clients
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: If-Match
+          in: header
+          description: >-
+            ETag da versão que o cliente leu (controle de concorrência
+            otimista). Se divergir da versão atual, a API responde **412
+            Precondition Failed** e nada é alterado.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClientDTO'
+            example:
+              phone: '16977776666'
+        required: true
+      responses:
+        '200':
+          description: Cliente atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+          description: A versão do recurso mudou desde a leitura (`If-Match` não confere).
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    delete:
+      summary: Remover cliente
+      deprecated: false
+      description: >-
+        Exclui o cliente. Retorna **409** se houver vendas associadas.
+
+
+        **Custo de rate limit:** 3 tokens (Token Bucket: capacidade 100,
+        reposição 100/min).
+      operationId: deleteClient
+      tags:
+        - Clients
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Cliente removido. Sem corpo na resposta.
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/clients/{clientId}/sales:
+    get:
+      summary: Listar vendas de um cliente
+      deprecated: false
+      description: >-
+        Sub-recurso hierárquico: retorna as vendas paginadas associadas a um
+        cliente específico.
+
+
+        **Custo de rate limit:** 2 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: listSalesByClient
+      tags:
+        - Sales
+      parameters:
+        - name: clientId
+          in: path
+          description: Identificador do documento do cliente no Firestore (string).
+          required: true
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: page
+          in: query
+          description: Página atual.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Itens por página.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista paginada de vendas do cliente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSalesResponse'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/sales:
+    get:
+      summary: Listar vendas
+      deprecated: false
+      description: >-
+        Retorna as vendas registradas, paginadas, com filtros por cliente,
+        vendedor, forma de pagamento e período.
+
+
+        **Custo de rate limit:** 2 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: listSales
+      tags:
+        - Sales
+      parameters:
+        - name: page
+          in: query
+          description: Página atual.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Itens por página.
+          required: false
+          example: ''
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: clientId
+          in: query
+          description: Filtra por cliente.
+          required: false
+          example: ''
+          schema:
+            type: string
+        - name: sellerId
+          in: query
+          description: Filtra por vendedor.
+          required: false
+          example: ''
+          schema:
+            type: string
+        - name: paymentMethod
+          in: query
+          description: >-
+            Filtra pela forma de pagamento conforme o valor textual persistido
+            no Firestore. Valor confirmado nos dados fornecidos: `Dinheiro`;
+            outros valores não foram confirmados.
+          required: false
+          example: Dinheiro
+          schema:
+            type: string
+            example: Dinheiro
+        - name: dateFrom
+          in: query
+          description: Início do período (inclusive).
+          required: false
+          example: ''
+          schema:
+            type: string
+            format: date-time
+        - name: dateTo
+          in: query
+          description: Fim do período (inclusive).
+          required: false
+          example: ''
+          schema:
+            type: string
+            format: date-time
+        - name: sort
+          in: query
+          description: >-
+            Ordenação. Prefixo `-` indica ordem decrescente. Campos:
+            `createdAt`, `finalTotal`.
+          required: false
+          example: '-createdAt'
+          schema:
+            type: string
+            pattern: ^-?(createdAt|finalTotal)(,-?(createdAt|finalTotal))*$
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista paginada de vendas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSalesResponse'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+    post:
+      summary: Registrar venda
+      deprecated: false
+      description: >-
+        Registra uma venda. **Regras de negócio:** o vendedor é obtido do JWT; o
+        preço unitário de cada item é lido do cadastro do produto (snapshot
+        gravado na venda); o estoque dos produtos é decrementado e os pontos de
+        fidelidade do cliente são creditados automaticamente. Retorna **409** se
+        algum item tiver estoque insuficiente.
+
+
+        **Custo de rate limit:** 5 tokens (Token Bucket: capacidade 100,
+        reposição 100/min). Envie `Idempotency-Key` para evitar vendas
+        duplicadas em caso de retry.
+      operationId: createSale
+      tags:
+        - Sales
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: >-
+            Chave única gerada pelo cliente (recomendado: UUID v4) para tornar o
+            POST seguro contra repetições (retry/duplo clique). Mesma chave +
+            mesmo corpo → mesma resposta, sem nova venda. Chave válida por 24h.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 128
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSaleDTO'
+            example:
+              clientId: 8NV1c7Q4TCYGcsuPch8I
+              paymentMethod: Dinheiro
+              discount: 0
+              items:
+                - productId: KIYBXACS6uVj5DbKEsPQ
+                  quantity: 2
+        required: true
+      responses:
+        '201':
+          description: Venda registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sale'
+          headers:
+            Location:
+              example: /api/v1/sales/8NV1c7Q4TCYGcsuPch8I
+              required: false
+              description: URI do recurso criado.
+              schema:
+                type: string
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Idempotency-Replayed:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: Requisição malformada (JSON inválido, parâmetro ausente).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: >-
+            Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+            insuficiente).
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+          description: '`Content-Type` não suportado. Use `application/json`.'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Sintaxe correta, porém violação de regras de validação.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /api/v1/sales/{id}:
+    get:
+      summary: Obter venda por ID
+      deprecated: false
+      description: >-
+        Busca uma venda específica pelo seu identificador do documento no
+        Firestore. Vendas são imutáveis após o registro.
+
+
+        **Custo de rate limit:** 1 token (Token Bucket: capacidade 100,
+        reposição 100/min). Suporta validação condicional: envie `If-None-Match`
+        com o `ETag` recebido e obtenha **304** se nada mudou.
+      operationId: getSaleById
+      tags:
+        - Sales
+      parameters:
+        - name: id
+          in: path
+          description: Identificador do documento no Firestore (string).
+          required: true
+          example: ID_DOCUMENTO_FIRESTORE
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: If-None-Match
+          in: header
+          description: >-
+            ETag previamente recebido. Se o recurso não mudou, a API responde
+            **304 Not Modified** sem corpo.
+          required: false
+          example: W/"33a64df551425fcc55e4d42a148795d9"
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          description: >-
+            Contexto de rastreamento distribuído (W3C Trace Context). Se
+            enviado, a API continua o mesmo trace; caso contrário, inicia um
+            novo.
+          required: false
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        - name: X-Request-Id
+          in: header
+          description: >-
+            Identificador de correlação gerado pelo cliente (UUID). Se ausente
+            ou inválido, o servidor gera um e o devolve na resposta.
+          required: false
+          example: 8NV1c7Q4TCYGcsuPch8I
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Venda encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sale'
+          headers:
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Limit:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Remaining:
+              required: false
+              description: ''
+              schema:
+                type: string
+            RateLimit-Reset:
+              required: false
+              description: ''
+              schema:
+                type: string
+            ETag:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Cache-Control:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '304':
+          $ref: '#/components/responses/NotModified'
+          description: >-
+            O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+            corpo.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: Token ausente, inválido ou expirado.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: Recurso não encontrado.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          description: Limite de requisições excedido (rate limiting).
+        '500':
+          $ref: '#/components/responses/InternalError'
+          description: >-
+            Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+            (correlacionar via `X-Request-Id`).
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          description: >-
+            Serviço temporariamente indisponível (manutenção, sobrecarga ou
+            dependência fora do ar).
+      security:
+        - bearerAuth: []
+  /health/live:
+    get:
+      summary: Liveness probe
+      deprecated: false
+      description: >-
+        Indica se o **processo** está vivo (não trava em deadlock). Verifica
+        somente a própria aplicação, **sem consultar o banco**; falha aqui faz o
+        orquestrador reiniciar o container. Rota pública.
+      operationId: healthLive
+      tags:
+        - Health
+      parameters: []
+      responses:
+        '200':
+          description: Processo ativo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: UP
+          headers:
+            Cache-Control:
+              example: no-store
+              required: false
+              description: Nunca armazenar.
+              schema:
+                type: string
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+      security: []
+  /health/ready:
+    get:
+      summary: Readiness probe
+      deprecated: false
+      description: >-
+        Indica se a instância está **pronta para receber tráfego** (banco
+        conectado, migrações aplicadas). Falha aqui retira a instância do
+        balanceador, **sem reiniciá-la**. Rota pública.
+      operationId: healthReady
+      tags:
+        - Health
+      parameters: []
+      responses:
+        '200':
+          description: Pronta para tráfego.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: UP
+                checks:
+                  database:
+                    status: UP
+                    latencyMs: 12
+          headers:
+            Cache-Control:
+              example: no-store
+              required: false
+              description: Nunca armazenar.
+              schema:
+                type: string
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+        '503':
+          description: Dependência indisponível; instância removida do balanceamento.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: DOWN
+                checks:
+                  database:
+                    status: DOWN
+          headers:
+            Cache-Control:
+              example: no-store
+              required: false
+              description: Nunca armazenar.
+              schema:
+                type: string
+            X-Request-Id:
+              required: false
+              description: ''
+              schema:
+                type: string
+            Retry-After:
+              required: false
+              description: ''
+              schema:
+                type: string
+      security: []
+components:
+  schemas:
+    ApiError:
+      type: object
+      description: >-
+        Problem Details para APIs HTTP (RFC 9457, que obsoletou a RFC 7807).
+        Content-Type: `application/problem+json`.
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri
+          description: >-
+            URI que identifica o tipo do problema (`about:blank` se não houver
+            documentação dedicada).
+          example: https://api.bookstore.dev/errors/validation-failed
+        title:
+          type: string
+          description: Resumo curto e legível do problema.
+          example: Erro de Validação de Dados
+        status:
+          type: integer
+          description: Código de status HTTP.
+          example: 422
+        detail:
+          type: string
+          description: Explicação específica desta ocorrência.
+          example: O campo 'title' é obrigatório.
+        instance:
+          type: string
+          description: URI da requisição que originou o erro.
+          example: /api/v1/products
+        invalidParams:
+          type: array
+          description: 'Extensão: lista de campos inválidos.'
+          items:
+            type: object
+            required:
+              - name
+              - reason
+            properties:
+              name:
+                type: string
+                example: title
+              reason:
+                type: string
+                example: Tamanho insuficiente
+          example: []
+        code:
+          type: string
+          description: >-
+            Extensão: código de erro estável e legível por máquina (ex.:
+            `AUTH_TOKEN_EXPIRED`), para o cliente tomar decisões sem depender do
+            texto.
+          example: VALIDATION_FAILED
+    PaginationMeta:
+      type: object
+      required:
+        - page
+        - limit
+        - totalItems
+        - totalPages
+        - hasNext
+      properties:
+        page:
+          type: integer
+          description: >-
+            Atributo `page` do schema PaginationMeta. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: 1
+        limit:
+          type: integer
+          description: >-
+            Atributo `limit` do schema PaginationMeta. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: 10
+        totalItems:
+          type: integer
+          description: >-
+            Atributo `totalItems` do schema PaginationMeta. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: 42
+        totalPages:
+          type: integer
+          description: >-
+            Atributo `totalPages` do schema PaginationMeta. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: 5
+        hasNext:
+          type: boolean
+          description: >-
+            Atributo `hasNext` do schema PaginationMeta. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: true
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          description: >-
+            Atributo `email` do schema LoginRequest. Representa o valor indicado
+            pelo próprio nome do campo; consulte o mapeamento Firebase quando
+            informado.
+          example: admin@api.com
+        password:
+          type: string
+          format: password
+          minLength: 1
+          description: >-
+            Atributo `password` do schema LoginRequest. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: Sup3rS3cr3t!
+    TokenResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - tokenType
+        - expiresIn
+        - refreshExpiresIn
+      properties:
+        accessToken:
+          type: string
+          description: 'JWT de acesso (curta duração). Enviar em `Authorization: Bearer`.'
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refreshToken:
+          type: string
+          description: >-
+            Token opaco de renovação (longa duração, **uso único**: cada
+            renovação o substitui por um novo). Enviar apenas em `/auth/refresh`
+            e `/auth/logout`.
+          example: rt_9f82a1c0d4e5b6a7c8d9e0f1a2b3c4d5
+        tokenType:
+          type: string
+          enum:
+            - Bearer
+          description: >-
+            Atributo `tokenType` do schema TokenResponse. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: Bearer
+        expiresIn:
+          type: integer
+          description: Validade do access token em segundos (900 = 15 min).
+          example: 900
+        refreshExpiresIn:
+          type: integer
+          description: Validade do refresh token em segundos (1209600 = 14 dias).
+          example: 1209600
+    User:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - active
+        - createdAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: ID do documento da coleção `UsuarioAPI` no Firestore.
+          readOnly: true
+          example: SDMXDsjJtqcqK1nWnrk0YjQDqPY2
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: >-
+            Nome do usuário; corresponde ao campo `nome` da coleção
+            `UsuarioAPI`.
+          x-firebase-field: nome
+          example: Novo usuário
+        email:
+          type: string
+          format: email
+          description: >-
+            E-mail usado para identificar o usuário da API; corresponde ao campo
+            `email`.
+          maxLength: 254
+          x-firebase-field: email
+          example: novo.usuario@example.com
+        phone:
+          type: string
+          description: Telefone do usuário; corresponde ao campo `telefone`.
+          minLength: 10
+          maxLength: 15
+          x-firebase-field: telefone
+          example: '16999999999'
+        active:
+          type: boolean
+          default: true
+          description: Indica se o usuário está ativo; corresponde ao booleano `ativo`.
+          x-firebase-field: ativo
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+          description: >-
+            Data e hora de criação do registro; corresponde a `criadoEm` na
+            coleção `UsuarioAPI`, representado em ISO 8601.
+          x-firebase-field: criadoEm
+          example: '2026-04-23T16:13:01-03:00'
+      description: >-
+        Representação da coleção `UsuarioAPI` do Firebase, distinta de
+        `Usuarios`.
+    CreateUserDTO:
+      type: object
+      required:
+        - name
+        - email
+        - password
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: >-
+            Nome do usuário; corresponde ao campo `nome` da coleção
+            `UsuarioAPI`.
+          x-firebase-field: nome
+          example: Novo usuário
+        email:
+          type: string
+          format: email
+          description: >-
+            E-mail usado para identificar o usuário da API; corresponde ao campo
+            `email`.
+          maxLength: 254
+          x-firebase-field: email
+          example: novo.usuario@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+          writeOnly: true
+          description: >-
+            Senha recebida para autenticação/cadastro. Campo de entrada somente;
+            nunca deve ser devolvido em respostas. A forma de armazenamento
+            seguro deve ser garantida pela implementação.
+          example: SenhaTemporaria123!
+        phone:
+          type: string
+          pattern: ^[0-9]{10,11}$
+          description: Telefone do usuário; corresponde ao campo `telefone`.
+          minLength: 10
+          maxLength: 15
+          x-firebase-field: telefone
+          example: '16999999999'
+        active:
+          type: boolean
+          default: true
+          description: Indica se o usuário está ativo; corresponde ao booleano `ativo`.
+          x-firebase-field: ativo
+          example: true
+      description: >-
+        Dados de entrada para criar usuário da API. A senha é somente de entrada
+        e não deve ser retornada.
+    UpdateUserDTO:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: >-
+            Nome do usuário; corresponde ao campo `nome` da coleção
+            `UsuarioAPI`.
+          x-firebase-field: nome
+          example: Novo usuário
+        phone:
+          type: string
+          pattern: ^[0-9]{10,11}$
+          description: Telefone do usuário; corresponde ao campo `telefone`.
+          minLength: 10
+          maxLength: 15
+          x-firebase-field: telefone
+          example: '16999999999'
+        active:
+          type: boolean
+          description: Indica se o usuário está ativo; corresponde ao booleano `ativo`.
+          x-firebase-field: ativo
+          example: true
+      description: Campos permitidos para atualização parcial de usuário da API.
+    PaginatedUsersResponse:
+      type: object
+      description: Envelope paginado de usuários.
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+          description: >-
+            Atributo `data` do schema PaginatedUsersResponse. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: []
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    Product:
+      type: object
+      required:
+        - id
+        - title
+        - author
+        - code
+        - isbn
+        - price
+        - stock
+        - createdAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            ID do documento do produto no Cloud Firestore, gerado pelo
+            Firestore. Não confundir com o campo `codigo`.
+          readOnly: true
+          example: KIYBXACS6uVj5DbKEsPQ
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: >-
+            Título/nome do livro. Corresponde ao campo `titulo` da coleção
+            `Produtos` no Firestore.
+          x-firebase-field: titulo
+          example: O príncipe cruel (Vol. 1 O povo do ar)
+        author:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: >-
+            Nome do autor ou autora do livro. Corresponde ao campo `autor` da
+            coleção `Produtos`.
+          x-firebase-field: autor
+          example: Holly Black
+        isbn:
+          type: string
+          pattern: ^[0-9]{10}([0-9]{3})?$
+          description: >-
+            ISBN do livro, armazenado como texto. A validação de dígito
+            verificador deve ser aplicada pela implementação quando suportada.
+          minLength: 10
+          maxLength: 17
+          x-firebase-field: isbn
+          example: '9788501101958'
+        code:
+          type: string
+          description: >-
+            Código textual próprio do produto, armazenado em `codigo`. Não é o
+            ID do documento Firestore; os dois identificadores têm finalidades
+            distintas.
+          minLength: 1
+          maxLength: 100
+          x-firebase-field: codigo
+          example: 0t1E9I47QBhiNZJdnqaf
+        price:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            Preço do produto armazenado no campo `preco` do Firestore, em
+            unidade monetária inteira conforme o dado existente. Não representa
+            um valor decimal.
+          example: 80
+        stock:
+          type: integer
+          minimum: 0
+          description: >-
+            Quantidade disponível em estoque. Corresponde ao campo inteiro
+            `estoque` no Firestore.
+          x-firebase-field: estoque
+          example: 10
+        createdAt:
+          type: string
+          format: date-time
+          description: >-
+            Data e hora de criação do registro; representa `createdAt`
+            (timestamp) do Firestore em ISO 8601.
+          x-firebase-field: createdAt
+          example: '2026-05-29T13:56:42-03:00'
+      description: >-
+        Representação de um livro na coleção `Produtos` do Cloud Firestore. Os
+        nomes em inglês da API correspondem aos campos persistidos em português
+        conforme `x-firebase-field`.
+    CreateProductDTO:
+      type: object
+      required:
+        - title
+        - author
+        - isbn
+        - price
+        - stock
+        - code
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: >-
+            Título/nome do livro. Corresponde ao campo `titulo` da coleção
+            `Produtos` no Firestore.
+          x-firebase-field: titulo
+          example: O príncipe cruel (Vol. 1 O povo do ar)
+        author:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: >-
+            Nome do autor ou autora do livro. Corresponde ao campo `autor` da
+            coleção `Produtos`.
+          x-firebase-field: autor
+          example: Holly Black
+        isbn:
+          type: string
+          pattern: ^[0-9]{10}([0-9]{3})?$
+          description: >-
+            ISBN do livro, armazenado como texto. A validação de dígito
+            verificador deve ser aplicada pela implementação quando suportada.
+          minLength: 10
+          maxLength: 17
+          x-firebase-field: isbn
+          example: '9788501101958'
+        code:
+          type: string
+          description: >-
+            Código textual próprio do produto, armazenado em `codigo`. Não é o
+            ID do documento Firestore; os dois identificadores têm finalidades
+            distintas.
+          minLength: 1
+          maxLength: 100
+          x-firebase-field: codigo
+          example: 0t1E9I47QBhiNZJdnqaf
+        price:
+          type: integer
+          minimum: 0
+          format: int64
+          description: >-
+            Preço do produto armazenado no campo `preco` do Firestore, em
+            unidade monetária inteira conforme o dado existente. Não representa
+            um valor decimal.
+          example: 80
+        stock:
+          type: integer
+          minimum: 0
+          default: 0
+          description: >-
+            Quantidade disponível em estoque. Corresponde ao campo inteiro
+            `estoque` no Firestore.
+          x-firebase-field: estoque
+          example: 10
+      description: >-
+        Dados necessários para criar um produto. O campo `code` é obrigatório
+        porque `codigo` existe na estrutura atual do Firebase.
+    UpdateProductDTO:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: >-
+            Título/nome do livro. Corresponde ao campo `titulo` da coleção
+            `Produtos` no Firestore.
+          x-firebase-field: titulo
+          example: O príncipe cruel (Vol. 1 O povo do ar)
+        author:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: >-
+            Nome do autor ou autora do livro. Corresponde ao campo `autor` da
+            coleção `Produtos`.
+          x-firebase-field: autor
+          example: Holly Black
+        isbn:
+          type: string
+          pattern: ^[0-9]{10}([0-9]{3})?$
+          description: >-
+            ISBN do livro, armazenado como texto. A validação de dígito
+            verificador deve ser aplicada pela implementação quando suportada.
+          minLength: 10
+          maxLength: 17
+          x-firebase-field: isbn
+          example: '9788501101958'
+        code:
+          type: string
+          description: >-
+            Código textual próprio do produto, armazenado em `codigo`. Não é o
+            ID do documento Firestore; os dois identificadores têm finalidades
+            distintas.
+          minLength: 1
+          maxLength: 100
+          x-firebase-field: codigo
+          example: 0t1E9I47QBhiNZJdnqaf
+        price:
+          type: integer
+          minimum: 0
+          format: int64
+          description: >-
+            Preço do produto armazenado no campo `preco` do Firestore, em
+            unidade monetária inteira conforme o dado existente. Não representa
+            um valor decimal.
+          example: 80
+        stock:
+          type: integer
+          minimum: 0
+          description: >-
+            Quantidade disponível em estoque. Corresponde ao campo inteiro
+            `estoque` no Firestore.
+          x-firebase-field: estoque
+          example: 10
+      description: >-
+        Campos permitidos para atualização parcial de um produto. Enviar somente
+        os atributos que serão alterados.
+    PaginatedProductsResponse:
+      type: object
+      description: Envelope paginado de produtos.
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+          description: >-
+            Atributo `data` do schema PaginatedProductsResponse. Representa o
+            valor indicado pelo próprio nome do campo; consulte o mapeamento
+            Firebase quando informado.
+          example: []
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    Client:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - active
+        - cpf
+        - birthDate
+        - loyaltyPoints
+        - createdAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            ID do documento do cliente no Cloud Firestore, gerado pelo
+            Firestore.
+          readOnly: true
+          example: 8NV1c7Q4TCYGcsuPch8I
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: Nome completo do cliente; corresponde ao campo `nome` no Firestore.
+          x-firebase-field: nome
+          example: Ana Souza
+        email:
+          type: string
+          format: email
+          description: >-
+            Endereço de e-mail do cliente; corresponde ao campo `email` no
+            Firestore.
+          maxLength: 254
+          x-firebase-field: email
+          example: ana.souza@example.com
+        phone:
+          type: string
+          description: >-
+            Telefone de contato do cliente; corresponde ao campo `telefone` no
+            Firestore. Armazenado como texto para preservar DDD e zeros.
+          minLength: 10
+          maxLength: 15
+          x-firebase-field: telefone
+          example: '16988887777'
+        loyaltyPoints:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: >-
+            Quantidade inteira de pontos acumulados pelo cliente. Corresponde a
+            `pontos` no Firestore.
+          format: int64
+          x-firebase-field: pontos
+          example: 40
+        createdAt:
+          type: string
+          format: date-time
+          description: >-
+            Data e hora de criação do cadastro; corresponde ao timestamp
+            `criadoEm` do Firestore e é exposto em ISO 8601.
+          x-firebase-field: criadoEm
+          example: '2026-04-24T13:42:20-03:00'
+        active:
+          type: boolean
+          description: >-
+            Indica se o cadastro do cliente está ativo. Corresponde ao booleano
+            `ativo` no Firestore.
+          x-firebase-field: ativo
+          example: true
+        cpf:
+          type: string
+          description: >-
+            CPF do cliente, armazenado como string. Exemplo sintético com 11
+            dígitos; a aplicação deve validar os dígitos verificadores. Enviar
+            somente números.
+          minLength: 11
+          maxLength: 11
+          pattern: ^[0-9]{11}$
+          x-firebase-field: cpf
+          example: '52998224725'
+        birthDate:
+          type: string
+          description: >-
+            Data de nascimento do cliente. Mantida como string no formato
+            `DD/MM/AAAA`, conforme o campo `dataNascimento` existente no
+            Firestore.
+          pattern: ^(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/([0-9]{4})$
+          minLength: 10
+          maxLength: 10
+          x-firebase-field: dataNascimento
+          example: 01/02/2000
+      description: Representação de um cliente da coleção `Clientes` do Cloud Firestore.
+    CreateClientDTO:
+      type: object
+      required:
+        - name
+        - email
+        - cpf
+        - birthDate
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: Nome completo do cliente; corresponde ao campo `nome` no Firestore.
+          x-firebase-field: nome
+          example: Ana Souza
+        email:
+          type: string
+          format: email
+          description: >-
+            Endereço de e-mail do cliente; corresponde ao campo `email` no
+            Firestore.
+          maxLength: 254
+          x-firebase-field: email
+          example: ana.souza@example.com
+        phone:
+          type: string
+          pattern: ^[0-9]{10,11}$
+          description: >-
+            Telefone de contato do cliente; corresponde ao campo `telefone` no
+            Firestore. Armazenado como texto para preservar DDD e zeros.
+          minLength: 10
+          maxLength: 15
+          x-firebase-field: telefone
+          example: '16988887777'
+        cpf:
+          type: string
+          description: >-
+            CPF do cliente, armazenado como string. Exemplo sintético com 11
+            dígitos; a aplicação deve validar os dígitos verificadores. Enviar
+            somente números.
+          minLength: 11
+          maxLength: 11
+          pattern: ^[0-9]{11}$
+          x-firebase-field: cpf
+          example: '52998224725'
+        birthDate:
+          type: string
+          pattern: ^(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/([0-9]{4})$
+          description: >-
+            Data de nascimento do cliente. Mantida como string no formato
+            `DD/MM/AAAA`, conforme o campo `dataNascimento` existente no
+            Firestore.
+          minLength: 10
+          maxLength: 10
+          x-firebase-field: dataNascimento
+          example: 01/02/2000
+        active:
+          type: boolean
+          default: true
+          description: >-
+            Indica se o cadastro do cliente está ativo. Corresponde ao booleano
+            `ativo` no Firestore.
+          x-firebase-field: ativo
+          example: true
+      description: >-
+        Dados de entrada para cadastrar cliente. O campo `loyaltyPoints` é
+        gerenciado pelo sistema e não é solicitado na criação.
+    UpdateClientDTO:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: Nome completo do cliente; corresponde ao campo `nome` no Firestore.
+          x-firebase-field: nome
+          example: Ana Souza
+        email:
+          type: string
+          format: email
+          description: >-
+            Endereço de e-mail do cliente; corresponde ao campo `email` no
+            Firestore.
+          maxLength: 254
+          x-firebase-field: email
+          example: ana.souza@example.com
+        phone:
+          type: string
+          pattern: ^[0-9]{10,11}$
+          description: >-
+            Telefone de contato do cliente; corresponde ao campo `telefone` no
+            Firestore. Armazenado como texto para preservar DDD e zeros.
+          minLength: 10
+          maxLength: 15
+          x-firebase-field: telefone
+          example: '16988887777'
+        cpf:
+          type: string
+          description: >-
+            CPF do cliente, armazenado como string. Exemplo sintético com 11
+            dígitos; a aplicação deve validar os dígitos verificadores. Enviar
+            somente números.
+          minLength: 11
+          maxLength: 11
+          pattern: ^[0-9]{11}$
+          x-firebase-field: cpf
+          example: '52998224725'
+        birthDate:
+          type: string
+          pattern: ^(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/([0-9]{4})$
+          description: >-
+            Data de nascimento do cliente. Mantida como string no formato
+            `DD/MM/AAAA`, conforme o campo `dataNascimento` existente no
+            Firestore.
+          minLength: 10
+          maxLength: 10
+          x-firebase-field: dataNascimento
+          example: 01/02/2000
+        active:
+          type: boolean
+          description: >-
+            Indica se o cadastro do cliente está ativo. Corresponde ao booleano
+            `ativo` no Firestore.
+          x-firebase-field: ativo
+          example: true
+      description: Campos permitidos para atualização parcial de cliente.
+    PaginatedClientsResponse:
+      type: object
+      description: Envelope paginado de clientes.
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Client'
+          description: >-
+            Atributo `data` do schema PaginatedClientsResponse. Representa o
+            valor indicado pelo próprio nome do campo; consulte o mapeamento
+            Firebase quando informado.
+          example: []
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    SaleItem:
+      type: object
+      required:
+        - productId
+        - title
+        - quantity
+        - unitPrice
+      properties:
+        productId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: >-
+            ID do documento do produto na coleção `Produtos` do Firestore. Não
+            utilizar o campo `codigo` do produto como relacionamento.
+          x-firebase-field: produtoId
+          example: KIYBXACS6uVj5DbKEsPQ
+        title:
+          type: string
+          description: >-
+            Título do produto no momento da venda; corresponde a
+            `itens[].titulo`.
+          x-firebase-field: titulo
+          example: O príncipe cruel
+        quantity:
+          type: integer
+          minimum: 1
+          description: >-
+            Quantidade de unidades do produto nesta venda; corresponde a
+            `quantidade` no mapa do item.
+          format: int64
+          x-firebase-field: quantidade
+          example: 2
+        unitPrice:
+          type: number
+          minimum: 0
+          description: >-
+            Preço unitário registrado como snapshot do item da venda; no
+            Firebase, `itens[].preco` é double.
+          format: double
+          x-firebase-field: preco
+          example: 23.9
+      description: >-
+        Item registrado em uma venda, conforme a estrutura do mapa armazenado em
+        `itens` no Firestore.
+    CreateSaleItemDTO:
+      type: object
+      required:
+        - productId
+        - quantity
+      properties:
+        productId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: >-
+            ID do documento do produto na coleção `Produtos` do Firestore. Não
+            utilizar o campo `codigo` do produto como relacionamento.
+          x-firebase-field: produtoId
+          example: KIYBXACS6uVj5DbKEsPQ
+        quantity:
+          type: integer
+          minimum: 1
+          description: >-
+            Quantidade de unidades do produto nesta venda; corresponde a
+            `quantidade` no mapa do item.
+          format: int64
+          x-firebase-field: quantidade
+          example: 2
+      description: >-
+        Dados de entrada de cada item da venda. O produto é referenciado pelo ID
+        do documento Firestore, não pelo campo `codigo`.
+    Sale:
+      type: object
+      required:
+        - id
+        - clientId
+        - sellerId
+        - items
+        - grossTotal
+        - discount
+        - finalTotal
+        - paymentMethod
+        - createdAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: ID automático do documento da venda no Firestore; string, não UUID.
+          readOnly: true
+          example: ID_DOCUMENTO_FIRESTORE
+        clientId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            ID do documento do cliente na coleção `Clientes` do Firestore. Não é
+            CPF nem e-mail.
+          x-firebase-field: clienteId
+          example: 8NV1c7Q4TCYGcsuPch8I
+        clientName:
+          type: string
+          description: >-
+            Nome do cliente registrado na venda; corresponde a `clienteNome` no
+            Firestore.
+          x-firebase-field: clienteNome
+          example: Ana Souza
+        sellerId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            Identificador do vendedor gravado em `vendedorId`. A coleção/origem
+            exata desse identificador não foi confirmada nos dados fornecidos.
+          x-firebase-field: vendedorId
+          example: SDMXDsjJtqcqK1nWnrk0YjQDqPY2
+        sellerName:
+          type: string
+          description: >-
+            Nome ou identificação textual do vendedor gravada em `vendedorNome`;
+            o significado exato do valor deve seguir o dado persistido.
+          x-firebase-field: vendedorNome
+          example: vendedor@example.com
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SaleItem'
+          description: >-
+            Itens que compõem a venda. Cada item referencia um documento da
+            coleção `Produtos` e contém quantidade e preço/título registrados no
+            momento da venda. Corresponde a `itens` no Firestore.
+          example:
+            - productId: KIYBXACS6uVj5DbKEsPQ
+              quantity: 2
+        grossTotal:
+          type: number
+          minimum: 0
+          description: >-
+            Valor bruto da venda antes do desconto; corresponde a `totalBruto`
+            no Firestore.
+          format: double
+          x-firebase-field: totalBruto
+          example: 47.8
+        discount:
+          type: integer
+          minimum: 0
+          description: >-
+            Valor inteiro do desconto registrado na venda; corresponde ao campo
+            `desconto` no Firestore.
+          format: int64
+          x-firebase-field: desconto
+          example: 0
+        finalTotal:
+          type: number
+          minimum: 0
+          description: >-
+            Valor final da venda após aplicação do desconto; corresponde a
+            `totalFinal` no Firestore.
+          format: double
+          x-firebase-field: totalFinal
+          example: 47.8
+        paymentMethod:
+          type: string
+          description: >-
+            Forma de pagamento armazenada como texto em `formaPagamento`. Valor
+            confirmado nos exemplos do Firebase: `Dinheiro`; não se presume
+            enumeração de outros valores.
+          x-firebase-field: formaPagamento
+          example: Dinheiro
+        createdAt:
+          type: string
+          format: date-time
+          description: >-
+            Data e hora da venda; corresponde ao timestamp `data` no Firestore e
+            é exposto em ISO 8601.
+          x-firebase-field: data
+          example: '2026-05-06T10:06:00-03:00'
+      description: >-
+        Representação de uma venda conforme os campos `clienteId`,
+        `clienteNome`, `data`, `desconto`, `formaPagamento`, `itens`,
+        `totalBruto`, `totalFinal`, `vendedorId` e `vendedorNome` existentes no
+        Firestore.
+    CreateSaleDTO:
+      type: object
+      required:
+        - clientId
+        - paymentMethod
+        - items
+      properties:
+        clientId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            ID do documento do cliente na coleção `Clientes` do Firestore. Não é
+            CPF nem e-mail.
+          x-firebase-field: clienteId
+          example: 8NV1c7Q4TCYGcsuPch8I
+        paymentMethod:
+          type: string
+          description: >-
+            Forma de pagamento armazenada como texto em `formaPagamento`. Valor
+            confirmado nos exemplos do Firebase: `Dinheiro`; não se presume
+            enumeração de outros valores.
+          x-firebase-field: formaPagamento
+          example: Dinheiro
+        discount:
+          type: integer
+          minimum: 0
+          default: 0
+          description: >-
+            Valor inteiro do desconto registrado na venda; corresponde ao campo
+            `desconto` no Firestore.
+          format: int64
+          x-firebase-field: desconto
+          example: 0
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CreateSaleItemDTO'
+          description: >-
+            Itens que compõem a venda. Cada item referencia um documento da
+            coleção `Produtos` e contém quantidade e preço/título registrados no
+            momento da venda. Corresponde a `itens` no Firestore.
+          example:
+            - productId: KIYBXACS6uVj5DbKEsPQ
+              quantity: 2
+      description: >-
+        Dados de entrada para registrar venda. O identificador do vendedor é
+        obtido pela lógica de autenticação da aplicação, caso assim esteja
+        implementado; a origem exata deve ser confirmada.
+    PaginatedSalesResponse:
+      type: object
+      description: Envelope paginado de vendas.
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sale'
+          description: >-
+            Atributo `data` do schema PaginatedSalesResponse. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: []
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    HealthCheck:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - UP
+            - DOWN
+          description: >-
+            Atributo `status` do schema HealthCheck. Representa o valor indicado
+            pelo próprio nome do campo; consulte o mapeamento Firebase quando
+            informado.
+          example: UP
+        latencyMs:
+          type: integer
+          description: >-
+            Atributo `latencyMs` do schema HealthCheck. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: 12
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - UP
+            - DOWN
+          description: >-
+            Atributo `status` do schema HealthResponse. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: UP
+        checks:
+          type: object
+          description: Estado de cada dependência (apenas em `/health/ready`).
+          additionalProperties:
+            $ref: '#/components/schemas/HealthCheck'
+          properties: {}
+          example:
+            database:
+              status: UP
+              latencyMs: 12
+    RefreshRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 20
+          maxLength: 512
+          description: >-
+            Atributo `refreshToken` do schema RefreshRequest. Representa o valor
+            indicado pelo próprio nome do campo; consulte o mapeamento Firebase
+            quando informado.
+          example: rt_9f82a1c0d4e5b6a7c8d9e0f1a2b3c4d5
+  responses:
+    BadRequest:
+      description: Requisição malformada (JSON inválido, parâmetro ausente).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            Sucesso:
+              summary: Sucesso
+              value:
+                type: https://api.bookstore.dev/errors/bad-request
+                title: Requisição Inválida
+                status: 400
+                detail: O corpo da requisição não é um JSON válido.
+                instance: /api/v1/products
+                code: BAD_REQUEST
+      headers:
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    Unauthorized:
+      description: Token ausente, inválido ou expirado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            token-expired:
+              summary: token-expired
+              value:
+                type: https://api.bookstore.dev/errors/unauthorized
+                title: Não Autenticado
+                status: 401
+                detail: O token de acesso está expirado.
+                instance: /api/v1/products
+                code: AUTH_TOKEN_EXPIRED
+            token-missing:
+              summary: token-missing
+              value:
+                type: https://api.bookstore.dev/errors/unauthorized
+                title: Não Autenticado
+                status: 401
+                detail: O cabeçalho Authorization não foi informado.
+                instance: /api/v1/products
+                code: AUTH_TOKEN_MISSING
+      headers:
+        WWW-Authenticate:
+          description: ''
+          required: false
+          schema:
+            type: string
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    Forbidden:
+      description: Autenticado, porém sem a permissão (escopo) exigida pela operação.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            Sucesso:
+              summary: Sucesso
+              value:
+                type: https://api.bookstore.dev/errors/forbidden
+                title: Acesso Negado
+                status: 403
+                detail: >-
+                  Sua conta não possui a permissão 'products:write' exigida por
+                  esta operação.
+                instance: /api/v1/products
+                code: INSUFFICIENT_PERMISSIONS
+      headers:
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    NotFound:
+      description: Recurso não encontrado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            Sucesso:
+              summary: Sucesso
+              value:
+                type: https://api.bookstore.dev/errors/not-found
+                title: Recurso Inexistente
+                status: 404
+                detail: O recurso com o identificador informado não foi localizado.
+                instance: /api/v1/products/00000000-0000-0000-0000-000000000000
+                code: NOT_FOUND
+      headers:
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    Conflict:
+      description: >-
+        Conflito de estado (ex.: e-mail/ISBN já cadastrado, estoque
+        insuficiente).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            duplicate-resource:
+              summary: duplicate-resource
+              value:
+                type: https://api.bookstore.dev/errors/duplicate-resource
+                title: Recurso Duplicado
+                status: 409
+                detail: Já existe um registro com o e-mail informado.
+                instance: /api/v1/clients
+                code: DUPLICATE_RESOURCE
+            insufficient-stock:
+              summary: insufficient-stock
+              value:
+                type: https://api.bookstore.dev/errors/insufficient-stock
+                title: Estoque Insuficiente
+                status: 409
+                detail: 'O produto ''Duna'' possui 1 unidade em estoque; solicitadas: 2.'
+                instance: /api/v1/sales
+                code: INSUFFICIENT_STOCK
+            resource-in-use:
+              summary: resource-in-use
+              value:
+                type: https://api.bookstore.dev/errors/resource-in-use
+                title: Recurso em Uso
+                status: 409
+                detail: O produto possui vendas associadas e não pode ser removido.
+                instance: /api/v1/products/KIYBXACS6uVj5DbKEsPQ
+                code: RESOURCE_IN_USE
+            idempotency-in-progress:
+              summary: idempotency-in-progress
+              value:
+                type: https://api.bookstore.dev/errors/idempotency-in-progress
+                title: Requisição em Andamento
+                status: 409
+                detail: >-
+                  Já existe uma requisição em processamento com esta
+                  Idempotency-Key.
+                instance: /api/v1/sales
+                code: IDEMPOTENCY_IN_PROGRESS
+      headers:
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    UnprocessableEntity:
+      description: Sintaxe correta, porém violação de regras de validação.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            validation-failed:
+              summary: validation-failed
+              value:
+                type: https://api.bookstore.dev/errors/validation-failed
+                title: Erro de Validação de Dados
+                status: 422
+                detail: >-
+                  O campo 'title' é obrigatório e deve conter no mínimo 1
+                  caractere.
+                instance: /api/v1/products
+                invalidParams:
+                  - name: title
+                    reason: Campo obrigatório
+                code: VALIDATION_FAILED
+            idempotency-key-mismatch:
+              summary: idempotency-key-mismatch
+              value:
+                type: https://api.bookstore.dev/errors/idempotency-key-mismatch
+                title: Chave de Idempotência Reutilizada
+                status: 422
+                detail: >-
+                  A Idempotency-Key já foi usada com um corpo de requisição
+                  diferente.
+                instance: /api/v1/sales
+                code: IDEMPOTENCY_KEY_MISMATCH
+      headers:
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    TooManyRequests:
+      description: Limite de requisições excedido (rate limiting).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            Sucesso:
+              summary: Sucesso
+              value:
+                type: https://api.bookstore.dev/errors/too-many-requests
+                title: Muitas Requisições
+                status: 429
+                detail: Limite de requisições excedido. Tente novamente em instantes.
+                instance: /api/v1/auth/login
+                code: TOO_MANY_REQUESTS
+      headers:
+        Retry-After:
+          description: ''
+          required: false
+          schema:
+            type: string
+        RateLimit-Limit:
+          description: ''
+          required: false
+          schema:
+            type: string
+        RateLimit-Remaining:
+          description: ''
+          required: false
+          schema:
+            type: string
+        RateLimit-Reset:
+          description: ''
+          required: false
+          schema:
+            type: string
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    PreconditionFailed:
+      description: A versão do recurso mudou desde a leitura (`If-Match` não confere).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            Sucesso:
+              summary: Sucesso
+              value:
+                type: https://api.bookstore.dev/errors/precondition-failed
+                title: Pré-condição Falhou
+                status: 412
+                detail: >-
+                  O recurso foi modificado por outro usuário. Releia (GET) e
+                  tente novamente.
+                instance: /api/v1/products/KIYBXACS6uVj5DbKEsPQ
+                code: PRECONDITION_FAILED
+      headers:
+        ETag:
+          description: ''
+          required: false
+          schema:
+            type: string
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    UnsupportedMediaType:
+      description: '`Content-Type` não suportado. Use `application/json`.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            Sucesso:
+              summary: Sucesso
+              value:
+                type: https://api.bookstore.dev/errors/unsupported-media-type
+                title: Tipo de Mídia Não Suportado
+                status: 415
+                detail: >-
+                  Content-Type 'text/plain' não é suportado. Use
+                  'application/json'.
+                instance: /api/v1/products
+                code: UNSUPPORTED_MEDIA_TYPE
+      headers:
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    InternalError:
+      description: >-
+        Erro interno não tratado. Detalhes técnicos ficam apenas nos logs
+        (correlacionar via `X-Request-Id`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            Sucesso:
+              summary: Sucesso
+              value:
+                type: https://api.bookstore.dev/errors/internal-error
+                title: Erro Interno do Servidor
+                status: 500
+                detail: Ocorreu um erro inesperado. Informe o X-Request-Id ao suporte.
+                instance: /api/v1/products
+                code: INTERNAL_ERROR
+      headers:
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    ServiceUnavailable:
+      description: >-
+        Serviço temporariamente indisponível (manutenção, sobrecarga ou
+        dependência fora do ar).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            Sucesso:
+              summary: Sucesso
+              value:
+                type: https://api.bookstore.dev/errors/service-unavailable
+                title: Serviço Indisponível
+                status: 503
+                detail: >-
+                  O serviço está temporariamente indisponível. Tente novamente
+                  em instantes.
+                instance: /api/v1/products
+                code: SERVICE_UNAVAILABLE
+      headers:
+        Retry-After:
+          description: ''
+          required: false
+          schema:
+            type: string
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+    NotModified:
+      description: >-
+        O recurso não mudou desde a versão informada em `If-None-Match`. Sem
+        corpo.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties: {}
+      headers:
+        ETag:
+          description: ''
+          required: false
+          schema:
+            type: string
+        Cache-Control:
+          description: ''
+          required: false
+          schema:
+            type: string
+        RateLimit-Limit:
+          description: ''
+          required: false
+          schema:
+            type: string
+        RateLimit-Remaining:
+          description: ''
+          required: false
+          schema:
+            type: string
+        RateLimit-Reset:
+          description: ''
+          required: false
+          schema:
+            type: string
+        X-Request-Id:
+          description: ''
+          required: false
+          schema:
+            type: string
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Token JWT Bearer usado pela API. Os campos informados do Firebase não
+        confirmam claims `role` ou `permissions`; qualquer regra de autorização
+        por perfil depende da implementação e deve ser validada separadamente.
+servers: []
+security: []
