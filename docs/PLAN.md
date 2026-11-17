@@ -1,147 +1,171 @@
 # PLAN.md — Roteiro Técnico de Implementação (Bookstore API)
 
-**Gerado por:** Roberta Souza 
-**Fontes de Governança:** AGENTS.md, STYLEGUIDE.md, SPEC.md e Bookstore API.openapi.yaml
+**Gerado por:** [Tech Lead]
 
-**Objetivo:** Evoluir a especificação da Bookstore API para uma arquitetura backend documentada, testável e compatível com os conceitos estudados de ORM, autenticação JWT, RBAC e Spec-Driven Development.
+**Fontes de Governança:**
+
+- docs/AGENTS.md
+- docs/STYLEGUIDE.md
+- docs/SPEC.md
+- apidog/Bookstore API.openapi.yaml
+
+Objetivo:
+
+Implementar uma arquitetura de referência para a Bookstore API utilizando os princípios de Spec-Driven Development (SDD), respeitando integralmente o contrato OpenAPI derivado da aplicação real construída sobre Firebase Firestore.
 
 ---
 
 # Fase 1 — Fundação e Estrutura Arquitetural
 
-- [ ] Passo 1.1: Criar a estrutura de diretórios do projeto:
-
-```text
-src/api/
-├── __init__.py
-├── main.py
-├── schemas.py
-├── models.py
-├── database.py
-├── security.py
-├── exceptions.py
-├── routers/
-│   ├── auth.py
-│   ├── users.py
-│   ├── products.py
-│   ├── clients.py
-│   └── sales.py
-└── tests/
-    ├── conftest.py
-    ├── test_auth.py
-    ├── test_products.py
-    ├── test_clients.py
-    └── test_sales.py
-```
-
-- [ ] Passo 1.2: Criar o arquivo `requirements.txt`.
-- [ ] Passo 1.3: Configurar dependências FastAPI, Pydantic v2, SQLAlchemy 2.0, PyJWT, pytest e httpx.
-- [ ] Passo 1.4: Validar conformidade da estrutura com STYLEGUIDE.md.
+- [ ] Passo 1.1 Criar estrutura base do projeto.
+- [ ] Passo 1.2 Configurar ambiente Python 3.12.
+- [ ] Passo 1.3 Configurar dependências FastAPI.
+- [ ] Passo 1.4 Configurar dependências SQLAlchemy 2.0.
+- [ ] Passo 1.5 Configurar PyJWT.
+- [ ] Passo 1.6 Configurar pytest, httpx e TestClient.
+- [ ] Passo 1.7 Validar aderência ao STYLEGUIDE.md.
 
 ---
 
-# Fase 2 — Extração de Schemas e Contratos OpenAPI
-
-- [ ] Passo 2.1: Extrair do contrato OpenAPI os schemas da entidade Users.
-- [ ] Passo 2.2: Extrair do contrato OpenAPI os schemas da entidade Products.
-- [ ] Passo 2.3: Extrair do contrato OpenAPI os schemas da entidade Clients.
-- [ ] Passo 2.4: Extrair do contrato OpenAPI os schemas da entidade Sales.
-- [ ] Passo 2.5: Criar schema SaleItems para representar itens de venda.
-
-### Schemas de autenticação
-
-- [ ] Passo 2.6: Criar LoginRequestDTO.
-- [ ] Passo 2.7: Criar TokenResponseDTO.
-- [ ] Passo 2.8: Criar UserResponseDTO.
-- [ ] Passo 2.9: Criar RefreshTokenDTO.
-
-### Schemas de erro
-
-- [ ] Passo 2.10: Criar InvalidParam.
-- [ ] Passo 2.11: Criar ApiError seguindo RFC 9457.
-
-### Regras de negócio
-
-- [ ] Passo 2.12: Implementar validações de estoque.
-- [ ] Passo 2.13: Implementar validações de ISBN.
-- [ ] Passo 2.14: Implementar validações de programa de fidelidade.
-- [ ] Passo 2.15: Implementar validações de venda e itens da venda.
-
----
-
-# Fase 3 — Modelagem ORM e Persistência
+# Fase 2 — Extração de Schemas OpenAPI
 
 ## Users
 
-- [ ] Passo 3.1: Criar UserModel.
-- [ ] Passo 3.2: Definir role ADMIN e EMPLOYEE.
-- [ ] Passo 3.3: Configurar relacionamento User → Sales.
+- [x] Passo 2.1 Criar schema User.
+- [x] Passo 2.2 Criar CreateUserDTO.
+- [x] Passo 2.3 Criar UpdateUserDTO.
 
 ## Products
 
-- [ ] Passo 3.4: Criar ProductModel.
-- [ ] Passo 3.5: Configurar controle de estoque.
+- [x] Passo 2.4 Criar schema Product.
+- [x] Passo 2.5 Criar CreateProductDTO.
+- [x] Passo 2.6 Criar UpdateProductDTO.
 
 ## Clients
 
-- [ ] Passo 3.6: Criar ClientModel.
-- [ ] Passo 3.7: Configurar loyaltyPoints.
-- [ ] Passo 3.8: Configurar loyaltyProgramActive.
-- [ ] Passo 3.9: Configurar relacionamento Client → Sales.
+- [x] Passo 2.7 Criar schema Client.
+- [x] Passo 2.8 Criar CreateClientDTO.
+- [x] Passo 2.9 Criar UpdateClientDTO.
 
 ## Sales
 
-- [ ] Passo 3.10: Criar SaleModel.
-- [ ] Passo 3.11: Configurar relacionamento User → Sales.
-- [ ] Passo 3.12: Configurar relacionamento Client → Sales.
-- [ ] Passo 3.13: Configurar relacionamento Sale → SaleItems.
+- [x] Passo 2.10 Criar schema Sale.
+- [x] Passo 2.11 Criar CreateSaleDTO.
+- [x] Passo 2.12 Criar SaleItem.
+- [x] Passo 2.13 Criar PaginatedSalesResponse.
 
-## SaleItems
+## Auth
 
-- [ ] Passo 3.14: Criar SaleItemModel.
-- [ ] Passo 3.15: Configurar relacionamento Product → SaleItems.
-- [ ] Passo 3.16: Configurar relacionamento Sale → SaleItems.
+- [x] Passo 2.14 Criar LoginRequest.
+- [x] Passo 2.15 Criar TokenResponse.
+- [x] Passo 2.16 Criar RefreshRequest.
+- [x] Passo 2.17 Reutilizar o schema User na resposta de GET /api/v1/auth/me.
 
-## Banco de Dados
+## Paginação
 
-- [ ] Passo 3.17: Implementar database.py.
-- [ ] Passo 3.18: Configurar SQLite para ambiente de desenvolvimento.
-- [ ] Passo 3.19: Criar SessionLocal.
-- [ ] Passo 3.20: Implementar get_db().
-- [ ] Passo 3.21: Criar seed inicial de usuários.
-- [ ] Passo 3.22: Criar seed inicial de produtos.
-- [ ] Passo 3.23: Criar seed inicial de clientes.
-- [ ] Passo 3.24: Criar seed inicial de vendas.
+- [x] Passo 2.18 Criar PaginationMeta.
+- [x] Passo 2.19 Criar PaginatedUsersResponse.
+- [x] Passo 2.20 Criar PaginatedProductsResponse.
+- [x] Passo 2.21 Criar PaginatedClientsResponse.
+
+## RFC9457
+
+- [x] Passo 2.22 Criar InvalidParam.
+- [x] Passo 2.23 Criar ApiError.
+- [x] Passo 2.24 Adicionar campo code.
+- [x] Passo 2.25 Implementar application/problem+json.
 
 ---
 
-# Fase 4 — Segurança, JWT e Controle de Acesso
+# Fase 3 — Persistência e ORM
 
-## Autenticação
+## Usuários
 
-- [ ] Passo 4.1: Configurar geração de JWT.
-- [ ] Passo 4.2: Configurar validação de JWT.
-- [ ] Passo 4.3: Implementar login.
-- [ ] Passo 4.4: Implementar refresh token.
-- [ ] Passo 4.5: Implementar logout.
-- [ ] Passo 4.6: Implementar endpoint /auth/me.
+- [x] Passo 3.1 Criar UserModel.
+- [x] Passo 3.2 Implementar ADMIN.
+- [x] Passo 3.3 Implementar SELLER.
+
+## Produtos
+
+- [x] Passo 3.4 Criar ProductModel.
+- [x] Passo 3.5 Implementar campo code.
+- [x] Passo 3.6 Implementar ISBN.
+- [x] Passo 3.7 Implementar estoque.
+
+## Clientes
+
+- [x] Passo 3.8 Criar ClientModel.
+- [x] Passo 3.9 Implementar CPF.
+- [x] Passo 3.10 Implementar birthDate.
+- [x] Passo 3.11 Implementar loyaltyPoints.
+
+## Vendas
+
+- [x] Passo 3.12 Criar SaleModel.
+- [x] Passo 3.13 Implementar clientId obrigatório.
+- [x] Passo 3.14 Implementar sellerId.
+- [x] Passo 3.15 Implementar grossTotal.
+- [x] Passo 3.16 Implementar discount.
+- [x] Passo 3.17 Implementar finalTotal.
+
+## Itens
+
+- [x] Passo 3.18 Criar SaleItemModel.
+- [x] Passo 3.19 Implementar relacionamento Sale → SaleItems.
+- [x] Passo 3.20 Implementar relacionamento Product → SaleItems.
+
+## Sessão e Tokens
+
+- [x] Passo 3.21 Criar RefreshTokenModel.
+- [x] Passo 3.22 Implementar familyId.
+- [x] Passo 3.23 Implementar token hash.
+- [x] Passo 3.24 Implementar revogação.
+- [x] Passo 3.25 Implementar expiração.
+
+## Database
+
+- [x] Passo 3.26 Criar SessionLocal.
+- [x] Passo 3.27 Implementar get_db().
+- [x] Passo 3.28 Criar seed inicial.
+- [x] Passo 3.29 Criar usuários ADMIN e SELLER.
+- [x] Passo 3.30 Criar produtos de exemplo.
+- [x] Passo 3.31 Criar clientes de exemplo.
+
+---
+
+# Fase 4 — Segurança e RFC 9457
+
+## JWT
+
+- [x] Passo 4.1 Implementar Access Token.
+- [x] Passo 4.2 Implementar Refresh Token.
+- [x] Passo 4.3 Implementar rotação de token.
+- [x] Passo 4.4 Implementar revogação.
 
 ## RBAC
 
-- [ ] Passo 4.7: Criar enum de perfis.
-- [ ] Passo 4.8: Implementar perfil ADMIN.
-- [ ] Passo 4.9: Implementar perfil EMPLOYEE.
-- [ ] Passo 4.10: Criar dependência require_roles().
+- [x] Passo 4.5 Implementar ADMIN.
+- [x] Passo 4.6 Implementar SELLER.
+- [x] Passo 4.7 Implementar require_roles().
 
-## Tratamento de Erros
+## RFC9457
 
-- [ ] Passo 4.11: Criar ApiErrorException.
-- [ ] Passo 4.12: Implementar erro 400.
-- [ ] Passo 4.13: Implementar erro 401.
-- [ ] Passo 4.14: Implementar erro 403.
-- [ ] Passo 4.15: Implementar erro 404.
-- [ ] Passo 4.16: Implementar erro 409.
-- [ ] Passo 4.17: Implementar erro 422.
+- [x] Passo 4.8 Implementar 400.
+- [x] Passo 4.9 Implementar 401.
+- [x] Passo 4.10 Implementar 403.
+- [x] Passo 4.11 Implementar 404.
+- [x] Passo 4.12 Implementar 409.
+- [x] Passo 4.13 Implementar 412.
+- [x] Passo 4.14 Implementar 422.
+- [x] Passo 4.15 Implementar 429.
+
+## Headers Avançados
+
+- [x] Passo 4.16 Implementar ETag.
+- [x] Passo 4.17 Implementar If-None-Match.
+- [x] Passo 4.18 Implementar If-Match.
+- [x] Passo 4.19 Implementar Idempotency-Key.
+- [x] Passo 4.20 Implementar X-Request-Id.
 
 ---
 
@@ -149,94 +173,109 @@ src/api/
 
 ## Auth
 
-- [ ] Passo 5.1: Implementar POST /auth/login.
-- [ ] Passo 5.2: Implementar POST /auth/refresh.
-- [ ] Passo 5.3: Implementar POST /auth/logout.
-- [ ] Passo 5.4: Implementar GET /auth/me.
+- [x] Passo 5.1 POST /api/v1/auth/login
+- [x] Passo 5.2 POST /api/v1/auth/refresh
+- [x] Passo 5.3 POST /api/v1/auth/logout
+- [x] Passo 5.4 GET /api/v1/auth/me
 
 ## Users
 
-- [ ] Passo 5.5: Implementar GET /users.
-- [ ] Passo 5.6: Implementar POST /users.
-- [ ] Passo 5.7: Implementar GET /users/{id}.
-- [ ] Passo 5.8: Implementar PATCH /users/{id}.
-- [ ] Passo 5.9: Implementar DELETE /users/{id}.
+- [x] Passo 5.5 GET /api/v1/users
+- [x] Passo 5.6 POST /api/v1/users
+- [x] Passo 5.7 GET /api/v1/users/{id}
+- [x] Passo 5.8 PATCH /api/v1/users/{id}
 
 ## Products
 
-- [ ] Passo 5.10: Implementar GET /products.
-- [ ] Passo 5.11: Implementar POST /products.
-- [ ] Passo 5.12: Implementar GET /products/{id}.
-- [ ] Passo 5.13: Implementar PATCH /products/{id}.
-- [ ] Passo 5.14: Implementar DELETE /products/{id}.
+- [x] Passo 5.9 GET /api/v1/products
+- [x] Passo 5.10 POST /api/v1/products
+- [x] Passo 5.11 GET /api/v1/products/{id}
+- [x] Passo 5.12 PATCH /api/v1/products/{id}
+- [x] Passo 5.13 DELETE /api/v1/products/{id}
 
 ## Clients
 
-- [ ] Passo 5.15: Implementar GET /clients.
-- [ ] Passo 5.16: Implementar POST /clients.
-- [ ] Passo 5.17: Implementar GET /clients/{id}.
-- [ ] Passo 5.18: Implementar PATCH /clients/{id}.
-- [ ] Passo 5.19: Implementar DELETE /clients/{id}.
+- [x] Passo 5.14 GET /api/v1/clients
+- [x] Passo 5.15 POST /api/v1/clients
+- [x] Passo 5.16 GET /api/v1/clients/{id}
+- [x] Passo 5.17 PATCH /api/v1/clients/{id}
+- [x] Passo 5.18 DELETE /api/v1/clients/{id}
+- [x] Passo 5.19 GET /api/v1/clients/{clientId}/sales
 
 ## Sales
 
-- [ ] Passo 5.20: Implementar GET /sales.
-- [ ] Passo 5.21: Implementar POST /sales.
-- [ ] Passo 5.22: Implementar GET /sales/{id}.
-- [ ] Passo 5.23: Implementar PATCH /sales/{id}.
-- [ ] Passo 5.24: Implementar DELETE /sales/{id}.
+- [x] Passo 5.20 GET /api/v1/sales
+- [x] Passo 5.21 POST /api/v1/sales
+- [x] Passo 5.22 GET /api/v1/sales/{id}
 
-## Regras de Negócio
+## Health
 
-- [ ] Passo 5.25: Atualizar estoque após venda.
-- [ ] Passo 5.26: Validar estoque disponível.
-- [ ] Passo 5.27: Atualizar pontos de fidelidade.
-- [ ] Passo 5.28: Aplicar desconto por fidelidade.
-- [ ] Passo 5.29: Registrar itens da venda.
+- [x] Passo 5.23 GET /health/live
+- [x] Passo 5.24 GET /health/ready
 
 ---
 
 # Fase 6 — Testes Automatizados
 
-## Autenticação
+## Auth
 
-- [ ] Passo 6.1: Testar login válido.
-- [ ] Passo 6.2: Testar login inválido.
-- [ ] Passo 6.3: Testar token expirado.
-- [ ] Passo 6.4: Testar acesso sem token.
+- [x] Passo 6.1 Login válido.
+- [x] Passo 6.2 Login inválido.
+- [x] Passo 6.3 Rotação de refresh token.
+- [x] Passo 6.4 Reutilização de refresh token.
+- [x] Passo 6.5 Logout.
 
-## Produtos
+## Users
 
-- [ ] Passo 6.5: Testar cadastro.
-- [ ] Passo 6.6: Testar atualização.
-- [ ] Passo 6.7: Testar exclusão.
-- [ ] Passo 6.8: Testar controle de estoque.
+- [x] Passo 6.6 Criar usuário.
+- [x] Passo 6.7 Atualizar usuário.
+- [x] Passo 6.8 Inativar usuário.
 
-## Clientes
+## Products
 
-- [ ] Passo 6.9: Testar cadastro.
-- [ ] Passo 6.10: Testar pontos de fidelidade.
-- [ ] Passo 6.11: Testar aplicação de desconto.
+- [x] Passo 6.9 CRUD de produtos.
+- [x] Passo 6.10 Estoque.
+- [x] Passo 6.11 Produto em uso.
 
-## Vendas
+## Clients
 
-- [ ] Passo 6.12: Testar registro de venda.
-- [ ] Passo 6.13: Testar venda sem cliente.
-- [ ] Passo 6.14: Testar venda com cliente fidelidade.
-- [ ] Passo 6.15: Testar cálculo do total.
+- [x] Passo 6.12 CRUD de clientes.
+- [x] Passo 6.13 Fidelidade.
+- [x] Passo 6.14 Histórico de vendas.
 
-## Erros
+## Sales
 
-- [ ] Passo 6.16: Testar erro 400.
-- [ ] Passo 6.17: Testar erro 401.
-- [ ] Passo 6.18: Testar erro 403.
-- [ ] Passo 6.19: Testar erro 404.
-- [ ] Passo 6.20: Testar erro 409.
-- [ ] Passo 6.21: Testar erro 422.
+- [x] Passo 6.15 Registro de venda.
+- [x] Passo 6.16 Atualização de estoque.
+- [x] Passo 6.17 Acúmulo de pontos.
+- [x] Passo 6.18 Idempotência.
 
-## Validação Final
+## Infraestrutura
 
-- [ ] Passo 6.22: Executar suíte completa de testes.
-- [ ] Passo 6.23: Validar conformidade OpenAPI.
-- [ ] Passo 6.24: Validar conformidade RFC 9457.
-- [ ] Passo 6.25: Marcar projeto como concluído.
+- [x] Passo 6.19 ETag.
+- [x] Passo 6.20 If-Match.
+- [x] Passo 6.21 Health checks.
+- [x] Passo 6.22 Rate limiting.
+
+## RFC9457
+
+- [x] Passo 6.23 Validar 400.
+- [x] Passo 6.24 Validar 401.
+- [x] Passo 6.25 Validar 403.
+- [x] Passo 6.26 Validar 404.
+- [x] Passo 6.27 Validar 409.
+- [x] Passo 6.28 Validar 412.
+- [x] Passo 6.29 Validar 422.
+- [x] Passo 6.30 Validar 429.
+
+---
+
+# Critério de Conclusão
+
+O projeto somente poderá ser considerado concluído quando:
+
+- OpenAPI estiver 100% refletida na implementação.
+- SPEC.md, STYLEGUIDE.md, PLAN.md e TESTS.md estiverem consistentes.
+- Todos os testes planejados passarem.
+- JWT, RBAC, RFC9457, ETag, Rate Limiting e Idempotency-Key estiverem implementados.
+- Não houver divergências entre Firebase, OpenAPI e documentação SDD.

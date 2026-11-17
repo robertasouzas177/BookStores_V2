@@ -73,7 +73,7 @@ Toda implementação deve respeitar as entidades reais da Bookstore API:
 ```text
 User 1:N Sales
 
-Client 0..1 : N Sales
+Client 1:N Sales
 
 Sale 1:N SaleItems
 

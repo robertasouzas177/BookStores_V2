@@ -2,60 +2,85 @@
 
 ## 1. Objetivo
 
-Este documento define os cenários de teste da Bookstore API e serve como referência para validação funcional, testes automatizados e garantia de conformidade com:
+Este documento define os cenários de teste da Bookstore API e estabelece os critérios de validação para:
 
-- OpenAPI Specification
-- SPEC.md
-- STYLEGUIDE.md
-- Regras de negócio da livraria
+- Contrato OpenAPI
+- Regras de negócio
+- Autenticação JWT
+- Controle de acesso RBAC
 - Programa de fidelidade
 - Controle de estoque
-- JWT
-- RBAC
+- Persistência ORM
 - RFC 9457
+- Idempotência
+- Cache e concorrência otimista
 
 ---
 
-# 2. Escopo de Testes
+# 2. Escopo
 
-Os testes abrangem:
+Cobertura obrigatória:
 
-- Autenticação JWT
-- Controle de acesso RBAC
-- Usuários
-- Produtos
-- Clientes
-- Programa de Fidelidade
-- Vendas
-- Itens de Venda (SaleItems)
-- Controle de Estoque
-- Tratamento de Erros RFC 9457
-- Relacionamentos ORM
-- Regras de negócio
+- Auth
+- Users
+- Products
+- Clients
+- Sales
+- Fidelidade
+- Estoque
+- ORM
+- RFC 9457
+- ETag
+- Rate Limiting
+- Health Checks
+- Refresh Token Rotation
 
 ---
 
 # 3. Testes de Autenticação
 
-## AUTH-001 — Login com credenciais válidas
+## AUTH-001 — Login válido
 
-### Objetivo
+### Endpoint
 
-Validar a autenticação do usuário.
+```http
+POST /api/v1/auth/login
+```
 
-### Resultado Esperado
+### Resultado esperado
 
 ```http
 200 OK
 ```
 
-Retornando token JWT válido.
+Retorna:
+
+- accessToken
+- refreshToken
+- expiresIn
+- refreshExpiresIn
 
 ---
 
-## AUTH-002 — Login com senha inválida
+## AUTH-002 — Senha inválida
 
-### Resultado Esperado
+### Resultado esperado
+
+```http
+401 Unauthorized
+```
+
+Código:
+
+```text
+INVALID_CREDENTIALS
+```
+
+---
+
+## AUTH-003 — Usuário inexistente
+
+### Resultado esperado
 
 ```http
 401 Unauthorized
@@ -63,19 +88,15 @@ Retornando token JWT válido.
 
 ---
 
-## AUTH-003 — Login com usuário inexistente
+## AUTH-004 — Token ausente
 
-### Resultado Esperado
+### Endpoint
 
 ```http
-401 Unauthorized
+GET /api/v1/auth/me
 ```
 
----
-
-## AUTH-004 — Acesso sem token
-
-### Resultado Esperado
+### Resultado esperado
 
 ```http
 401 Unauthorized
@@ -85,29 +106,41 @@ Retornando token JWT válido.
 
 ## AUTH-005 — Token expirado
 
-### Resultado Esperado
+### Resultado esperado
 
 ```http
 401 Unauthorized
+```
+
+Código:
+
+```text
+AUTH_TOKEN_EXPIRED
 ```
 
 ---
 
 ## AUTH-006 — Refresh Token válido
 
-### Resultado Esperado
+### Endpoint
+
+```http
+POST /api/v1/auth/refresh
+```
+
+### Resultado esperado
 
 ```http
 200 OK
 ```
 
-Novo token gerado.
+Novo access token emitido.
 
 ---
 
 ## AUTH-007 — Refresh Token inválido
 
-### Resultado Esperado
+### Resultado esperado
 
 ```http
 401 Unauthorized
@@ -117,39 +150,29 @@ Novo token gerado.
 
 ## AUTH-008 — Logout
 
-### Resultado Esperado
+### Endpoint
 
 ```http
-200 OK
+POST /api/v1/auth/logout
 ```
 
-ou
+### Resultado esperado
 
 ```http
 204 No Content
 ```
 
-conforme contrato OpenAPI.
-
 ---
 
-## AUTH-009 — Endpoint /auth/me autenticado
+## AUTH-009 — Perfil autenticado
 
-### Resultado Esperado
+### Endpoint
 
 ```http
-200 OK
+GET /api/v1/auth/me
 ```
 
-Retornando informações do usuário.
-
----
-
-# 4. Testes de Controle de Acesso (RBAC)
-
-## RBAC-001 — ADMIN acessando recurso administrativo
-
-### Resultado Esperado
+### Resultado esperado
 
 ```http
 200 OK
@@ -157,40 +180,54 @@ Retornando informações do usuário.
 
 ---
 
-## RBAC-002 — EMPLOYEE acessando recurso administrativo
+## AUTH-010 — Reutilização de Refresh Token
 
-### Resultado Esperado
+### Objetivo
 
-```http
-403 Forbidden
-```
+Validar rotação obrigatória de refresh tokens.
 
----
-
-## RBAC-003 — Usuário sem autenticação
-
-### Resultado Esperado
+### Resultado esperado
 
 ```http
 401 Unauthorized
 ```
 
----
+Código:
 
-## RBAC-004 — ADMIN gerenciando usuários
-
-### Resultado Esperado
-
-Acesso permitido.
+```text
+REFRESH_TOKEN_REUSED
+```
 
 ---
 
-## RBAC-005 — EMPLOYEE gerenciando usuários
+# 4. Testes RBAC
 
-### Resultado Esperado
+## RBAC-001 — ADMIN acessando recurso administrativo
+
+### Resultado esperado
+
+```http
+200 OK
+```
+
+---
+
+## RBAC-002 — SELLER acessando recurso administrativo
+
+### Resultado esperado
 
 ```http
 403 Forbidden
+```
+
+---
+
+## RBAC-003 — Usuário não autenticado
+
+### Resultado esperado
+
+```http
+401 Unauthorized
 ```
 
 ---
@@ -199,7 +236,11 @@ Acesso permitido.
 
 ## USER-001 — Criar usuário
 
-### Resultado Esperado
+```http
+POST /api/v1/users
+```
+
+Resultado:
 
 ```http
 201 Created
@@ -209,7 +250,11 @@ Acesso permitido.
 
 ## USER-002 — Consultar usuário
 
-### Resultado Esperado
+```http
+GET /api/v1/users/{id}
+```
+
+Resultado:
 
 ```http
 200 OK
@@ -219,7 +264,11 @@ Acesso permitido.
 
 ## USER-003 — Atualizar usuário
 
-### Resultado Esperado
+```http
+PATCH /api/v1/users/{id}
+```
+
+Resultado:
 
 ```http
 200 OK
@@ -227,19 +276,29 @@ Acesso permitido.
 
 ---
 
-## USER-004 — Excluir usuário
+## USER-004 — Inativar usuário
 
-### Resultado Esperado
+### Cenário
+
+Atualizar:
+
+```json
+{
+  "active": false
+}
+```
+
+Resultado:
 
 ```http
-204 No Content
+200 OK
 ```
 
 ---
 
-## USER-005 — Consultar usuário inexistente
+## USER-005 — Usuário inexistente
 
-### Resultado Esperado
+Resultado:
 
 ```http
 404 Not Found
@@ -249,9 +308,9 @@ Acesso permitido.
 
 # 6. Testes de Produtos
 
-## PROD-001 — Criar produto válido
+## PROD-001 — Criar produto
 
-### Resultado Esperado
+Resultado:
 
 ```http
 201 Created
@@ -259,9 +318,9 @@ Acesso permitido.
 
 ---
 
-## PROD-002 — Consultar produto por ID
+## PROD-002 — Consultar produto
 
-### Resultado Esperado
+Resultado:
 
 ```http
 200 OK
@@ -271,7 +330,7 @@ Acesso permitido.
 
 ## PROD-003 — Atualizar produto
 
-### Resultado Esperado
+Resultado:
 
 ```http
 200 OK
@@ -281,7 +340,7 @@ Acesso permitido.
 
 ## PROD-004 — Excluir produto
 
-### Resultado Esperado
+Resultado:
 
 ```http
 204 No Content
@@ -291,7 +350,7 @@ Acesso permitido.
 
 ## PROD-005 — Produto inexistente
 
-### Resultado Esperado
+Resultado:
 
 ```http
 404 Not Found
@@ -299,17 +358,27 @@ Acesso permitido.
 
 ---
 
-## PROD-006 — ISBN válido
+## PROD-006 — Código obrigatório
 
-### Resultado Esperado
+### Validar campo
 
-Produto criado com sucesso.
+```text
+code
+```
+
+Resultado:
+
+```http
+422 Validation Error
+```
+
+quando ausente.
 
 ---
 
 ## PROD-007 — ISBN inválido
 
-### Resultado Esperado
+Resultado:
 
 ```http
 422 Validation Error
@@ -317,17 +386,9 @@ Produto criado com sucesso.
 
 ---
 
-## PROD-008 — Estoque inicial válido
+## PROD-008 — Estoque negativo
 
-### Resultado Esperado
-
-Estoque maior ou igual a zero.
-
----
-
-## PROD-009 — Estoque negativo
-
-### Resultado Esperado
+Resultado:
 
 ```http
 422 Validation Error
@@ -335,12 +396,18 @@ Estoque maior ou igual a zero.
 
 ---
 
-## PROD-010 — Consulta por ISBN
+## PROD-009 — Produto vinculado a vendas
 
-### Resultado Esperado
+Resultado:
 
 ```http
-200 OK
+409 Conflict
+```
+
+Código:
+
+```text
+RESOURCE_IN_USE
 ```
 
 ---
@@ -349,7 +416,7 @@ Estoque maior ou igual a zero.
 
 ## CLIENT-001 — Criar cliente
 
-### Resultado Esperado
+Resultado:
 
 ```http
 201 Created
@@ -359,7 +426,7 @@ Estoque maior ou igual a zero.
 
 ## CLIENT-002 — Atualizar cliente
 
-### Resultado Esperado
+Resultado:
 
 ```http
 200 OK
@@ -369,7 +436,7 @@ Estoque maior ou igual a zero.
 
 ## CLIENT-003 — Excluir cliente
 
-### Resultado Esperado
+Resultado:
 
 ```http
 204 No Content
@@ -377,9 +444,9 @@ Estoque maior ou igual a zero.
 
 ---
 
-## CLIENT-004 — Consultar cliente inexistente
+## CLIENT-004 — Cliente inexistente
 
-### Resultado Esperado
+Resultado:
 
 ```http
 404 Not Found
@@ -387,133 +454,9 @@ Estoque maior ou igual a zero.
 
 ---
 
-## CLIENT-005 — Habilitar programa de fidelidade
+## CLIENT-005 — CPF obrigatório
 
-### Resultado Esperado
-
-```json
-{
-  "loyaltyProgramActive": true
-}
-```
-
----
-
-## CLIENT-006 — Cliente fora do programa
-
-### Resultado Esperado
-
-```json
-{
-  "loyaltyProgramActive": false
-}
-```
-
----
-
-# 8. Testes de Programa de Fidelidade
-
-## LOYALTY-001 — Cliente participante realiza venda
-
-### Resultado Esperado
-
-```text
-+10 pontos
-```
-
----
-
-## LOYALTY-002 — Cliente não participante realiza venda
-
-### Resultado Esperado
-
-```text
-0 pontos
-```
-
----
-
-## LOYALTY-003 — Venda sem cliente vinculado
-
-### Resultado Esperado
-
-```text
-0 pontos
-```
-
----
-
-## LOYALTY-004 — Cliente atinge 100 pontos
-
-### Resultado Esperado
-
-```text
-Desconto de 10% disponível
-```
-
----
-
-## LOYALTY-005 — Aplicação do desconto
-
-### Resultado Esperado
-
-```text
-Desconto aplicado
-```
-
----
-
-## LOYALTY-006 — Reinicialização dos pontos
-
-### Resultado Esperado
-
-```text
-loyaltyPoints = 0
-```
-
----
-
-# 9. Testes de Vendas
-
-## SALE-001 — Registrar venda sem cliente
-
-### Resultado Esperado
-
-```http
-201 Created
-```
-
----
-
-## SALE-002 — Registrar venda com cliente
-
-### Resultado Esperado
-
-```http
-201 Created
-```
-
----
-
-## SALE-003 — Registrar venda utilizando desconto
-
-### Resultado Esperado
-
-```http
-201 Created
-```
-
-e
-
-```text
-loyaltyDiscountApplied = true
-```
-
----
-
-## SALE-004 — Venda sem itens
-
-### Resultado Esperado
+Resultado:
 
 ```http
 422 Validation Error
@@ -521,9 +464,25 @@ loyaltyDiscountApplied = true
 
 ---
 
-## SALE-005 — Consulta de venda
+## CLIENT-006 — Data de nascimento obrigatória
 
-### Resultado Esperado
+Resultado:
+
+```http
+422 Validation Error
+```
+
+---
+
+## CLIENT-007 — Histórico de vendas do cliente
+
+### Endpoint
+
+```http
+GET /api/v1/clients/{clientId}/sales
+```
+
+Resultado:
 
 ```http
 200 OK
@@ -531,41 +490,65 @@ loyaltyDiscountApplied = true
 
 ---
 
-## SALE-006 — Atualização de venda
+# 8. Testes de Fidelidade
 
-### Resultado Esperado
+## LOYALTY-001 — Acúmulo de pontos
 
-```http
-200 OK
-```
+### Cenário
 
----
+Registrar venda válida.
 
-## SALE-007 — Exclusão de venda
-
-### Resultado Esperado
-
-```http
-204 No Content
-```
-
----
-
-## SALE-008 — Cálculo automático do total
-
-### Resultado Esperado
+### Resultado esperado
 
 ```text
-totalAmount = soma dos subtotais
++10 pontos
 ```
 
 ---
 
-# 10. Testes de SaleItems
+## LOYALTY-002 — Cliente atinge 100 pontos
 
-## ITEM-001 — Adicionar item à venda
+### Resultado esperado
 
-### Resultado Esperado
+```text
+Elegível para desconto de 10%
+```
+
+---
+
+## LOYALTY-003 — Aplicar desconto
+
+### Resultado esperado
+
+Campo:
+
+```text
+discount
+```
+
+maior que zero.
+
+---
+
+## LOYALTY-004 — Atualização da pontuação
+
+### Resultado esperado
+
+Pontuação persistida corretamente.
+
+---
+
+# 9. Testes de Vendas
+
+## SALE-001 — Registrar venda válida
+
+### Endpoint
+
+```http
+POST /api/v1/sales
+```
+
+Resultado:
 
 ```http
 201 Created
@@ -573,9 +556,123 @@ totalAmount = soma dos subtotais
 
 ---
 
+## SALE-002 — Cliente obrigatório
+
+### Cenário
+
+Criar venda sem clientId.
+
+Resultado:
+
+```http
+422 Validation Error
+```
+
+---
+
+## SALE-003 — Vendedor obrigatório
+
+### Resultado esperado
+
+Venda associada ao seller autenticado.
+
+---
+
+## SALE-004 — Venda sem itens
+
+Resultado:
+
+```http
+422 Validation Error
+```
+
+---
+
+## SALE-005 — Consultar venda
+
+Resultado:
+
+```http
+200 OK
+```
+
+---
+
+## SALE-006 — PATCH em vendas
+
+### Endpoint inexistente
+
+Resultado:
+
+```http
+405 Method Not Allowed
+```
+
+---
+
+## SALE-007 — DELETE em vendas
+
+### Endpoint inexistente
+
+Resultado:
+
+```http
+405 Method Not Allowed
+```
+
+---
+
+## SALE-008 — Cálculo financeiro
+
+Validar:
+
+```text
+grossTotal
+
+discount
+
+finalTotal
+```
+
+---
+
+## SALE-009 — Idempotência
+
+### Reutilizar mesmo
+
+```http
+Idempotency-Key
+```
+
+### Resultado esperado
+
+Venda não duplicada.
+
+Header:
+
+```http
+Idempotency-Replayed
+```
+
+---
+
+# 10. Testes de Itens da Venda
+
+## ITEM-001 — Item embutido na venda
+
+Validar estrutura:
+
+```json
+{
+  "items": []
+}
+```
+
+---
+
 ## ITEM-002 — Quantidade inválida
 
-### Resultado Esperado
+Resultado:
 
 ```http
 422 Validation Error
@@ -585,7 +682,7 @@ totalAmount = soma dos subtotais
 
 ## ITEM-003 — Produto inexistente
 
-### Resultado Esperado
+Resultado:
 
 ```http
 404 Not Found
@@ -593,17 +690,15 @@ totalAmount = soma dos subtotais
 
 ---
 
-## ITEM-004 — Calcular subtotal
+## ITEM-004 — Snapshot do preço
 
-### Fórmula
+Validar:
 
 ```text
-subtotal = quantity × unitPrice
+unitPrice
 ```
 
-### Resultado Esperado
-
-Valor calculado corretamente.
+registrado no momento da venda.
 
 ---
 
@@ -611,43 +706,45 @@ Valor calculado corretamente.
 
 ## STOCK-001 — Reduzir estoque após venda
 
-### Resultado Esperado
+Resultado:
 
-Estoque atualizado automaticamente.
+Estoque atualizado.
 
 ---
 
 ## STOCK-002 — Estoque insuficiente
 
-### Resultado Esperado
+Resultado:
 
 ```http
 409 Conflict
 ```
 
----
+Código:
 
-## STOCK-003 — Bloqueio de estoque negativo
-
-### Resultado Esperado
-
-Operação rejeitada.
+```text
+INSUFFICIENT_STOCK
+```
 
 ---
 
-## STOCK-004 — Produto sem estoque
+## STOCK-003 — Impedir estoque negativo
 
-### Resultado Esperado
+Resultado:
 
-Não permitir venda.
+Operação bloqueada.
+
+---
+
+## STOCK-004 — Concorrência
+
+Validar atualização simultânea de estoque.
 
 ---
 
 # 12. Testes ORM
 
-## ORM-001 — User → Sales
-
-Validar relacionamento:
+## ORM-001
 
 ```text
 User 1:N Sales
@@ -655,19 +752,15 @@ User 1:N Sales
 
 ---
 
-## ORM-002 — Client → Sales
-
-Validar relacionamento:
+## ORM-002
 
 ```text
-Client 0..1 : N Sales
+Client 1:N Sales
 ```
 
 ---
 
-## ORM-003 — Sale → SaleItems
-
-Validar relacionamento:
+## ORM-003
 
 ```text
 Sale 1:N SaleItems
@@ -675,9 +768,7 @@ Sale 1:N SaleItems
 
 ---
 
-## ORM-004 — Product → SaleItems
-
-Validar relacionamento:
+## ORM-004
 
 ```text
 Product 1:N SaleItems
@@ -685,9 +776,7 @@ Product 1:N SaleItems
 
 ---
 
-## ORM-005 — Persistência dos relacionamentos
-
-### Resultado Esperado
+## ORM-005
 
 Integridade referencial preservada.
 
@@ -695,22 +784,22 @@ Integridade referencial preservada.
 
 # 13. Testes RFC 9457
 
-Todos os cenários abaixo devem validar a presença dos campos:
+Todos os erros devem validar:
 
 ```json
 {
   "type": "",
   "title": "",
   "status": 0,
-  "detail": ""
+  "detail": "",
+  "instance": "",
+  "code": ""
 }
 ```
 
 ---
 
-## ERROR-001 — 400 Bad Request
-
-### Resultado Esperado
+## ERROR-001
 
 ```http
 400 Bad Request
@@ -718,9 +807,7 @@ Todos os cenários abaixo devem validar a presença dos campos:
 
 ---
 
-## ERROR-002 — 401 Unauthorized
-
-### Resultado Esperado
+## ERROR-002
 
 ```http
 401 Unauthorized
@@ -728,9 +815,7 @@ Todos os cenários abaixo devem validar a presença dos campos:
 
 ---
 
-## ERROR-003 — 403 Forbidden
-
-### Resultado Esperado
+## ERROR-003
 
 ```http
 403 Forbidden
@@ -738,9 +823,7 @@ Todos os cenários abaixo devem validar a presença dos campos:
 
 ---
 
-## ERROR-004 — 404 Not Found
-
-### Resultado Esperado
+## ERROR-004
 
 ```http
 404 Not Found
@@ -748,9 +831,7 @@ Todos os cenários abaixo devem validar a presença dos campos:
 
 ---
 
-## ERROR-005 — 409 Conflict
-
-### Resultado Esperado
+## ERROR-005
 
 ```http
 409 Conflict
@@ -758,41 +839,103 @@ Todos os cenários abaixo devem validar a presença dos campos:
 
 ---
 
-## ERROR-006 — 422 Validation Error
+## ERROR-006
 
-### Resultado Esperado
+```http
+412 Precondition Failed
+```
+
+---
+
+## ERROR-007
 
 ```http
 422 Validation Error
 ```
 
-Com lista `invalidParams`.
+Validar:
 
----
-
-# 14. Critérios de Aceite
-
-A Bookstore API será considerada validada quando:
-
-- Todos os testes planejados forem implementados.
-- Todos os testes executarem com sucesso.
-- O contrato OpenAPI for respeitado.
-- As regras do SPEC.md forem respeitadas.
-- Os relacionamentos ORM funcionarem corretamente.
-- O programa de fidelidade funcionar corretamente.
-- O controle de estoque funcionar corretamente.
-- Os erros seguirem RFC 9457.
-
----
-
-# 15. Resultado Esperado da Fase QA
-
-```text
-100% dos testes executando com sucesso.
-
-100% de conformidade com OpenAPI.
-
-100% de conformidade com RFC 9457.
-
-100% de conformidade com as regras de negócio da Bookstore API.
+```json
+invalidParams
 ```
+
+---
+
+## ERROR-008
+
+```http
+429 Too Many Requests
+```
+
+---
+
+# 14. Testes de Cache e Concorrência
+
+## CONC-001 — ETag
+
+### Resultado esperado
+
+```http
+304 Not Modified
+```
+
+---
+
+## CONC-002 — If-Match
+
+### Resultado esperado
+
+```http
+412 Precondition Failed
+```
+
+---
+
+# 15. Testes de Health Check
+
+## HEALTH-001
+
+```http
+GET /health/live
+```
+
+Resultado:
+
+```http
+200 OK
+```
+
+---
+
+## HEALTH-002
+
+```http
+GET /health/ready
+```
+
+Resultado:
+
+```http
+200 OK
+```
+
+ou
+
+```http
+503 Service Unavailable
+```
+
+quando dependências estiverem indisponíveis.
+
+---
+
+# 16. Critérios de Aceite
+
+A Bookstore API somente será considerada validada quando:
+
+- Todos os testes executarem com sucesso.
+- A implementação respeitar o OpenAPI.
+- A implementação respeitar o SPEC.md.
+- A implementação respeitar o STYLEGUIDE.md.
+- Todos os erros seguirem RFC 9457.
+- JWT, RBAC, Fidelidade, Estoque, ETag, Idempotency-Key e Rate Limiting estiverem funcionando conforme especificado.

@@ -2,13 +2,19 @@
 
 ## 1. Visão Geral
 
-A Bookstore API é uma API REST para gerenciamento de livrarias, baseada em um sistema previamente desenvolvido utilizando Firebase Firestore.
+A Bookstore API é uma API REST para gerenciamento de livrarias baseada em um sistema previamente desenvolvido utilizando Firebase Firestore.
 
-O sistema permite o gerenciamento de produtos, clientes, usuários e vendas, centralizando as operações de estoque, fidelização de clientes e registro de transações comerciais.
+O sistema centraliza operações relacionadas a produtos, clientes, usuários e vendas, permitindo controle de estoque, programa de fidelidade e registro de transações comerciais.
 
-A especificação OpenAPI da solução encontra-se no arquivo `Bookstore API.openapi.yaml`, que representa a principal fonte de verdade para contratos, endpoints, schemas, validações e exemplos de uso da API.
+A especificação OpenAPI localizada em:
 
-O projeto segue a abordagem **Spec-Driven Development (SDD)**, utilizando especificação formal antes da implementação para garantir consistência entre documentação, regras de negócio e código.
+```text
+apidog/Bookstore API.openapi.yaml
+```
+
+é a fonte oficial de contratos, endpoints, schemas, exemplos e regras da API.
+
+O projeto utiliza a metodologia Spec-Driven Development (SDD).
 
 ---
 
@@ -16,156 +22,174 @@ O projeto segue a abordagem **Spec-Driven Development (SDD)**, utilizando especi
 
 ### Users
 
-Representam operadores e administradores responsáveis pela utilização do sistema.
+Representam operadores e administradores do sistema.
 
-**Campos principais:**
-
-- id
-- name
-- email
-- role
-
-### Products
-
-Representam os livros comercializados pela livraria.
-
-**Campos principais:**
-
-- id
-- title
-- author
-- isbn
-- price
-- stock
-
-### Clients
-
-Representam clientes cadastrados na base da livraria.
-
-**Campos principais:**
+Campos principais:
 
 - id
 - name
 - email
 - phone
+- active
+- createdAt
+- role
+
+Perfis previstos:
+
+- ADMIN
+- SELLER
+
+---
+
+### Products
+
+Representam os livros comercializados pela livraria.
+
+Campos principais:
+
+- id
+- code
+- title
+- author
+- isbn
+- price
+- stock
+- createdAt
+
+---
+
+### Clients
+
+Representam clientes cadastrados na base da livraria.
+
+Campos principais:
+
+- id
+- name
+- email
+- phone
+- cpf
+- birthDate
 - loyaltyPoints
-- loyaltyProgramActive
+- active
+- createdAt
+
+---
 
 ### Sales
 
-Representam as vendas realizadas na livraria.
+Representam vendas registradas na livraria.
 
-**Campos principais:**
+Campos principais:
 
 - id
-- userId
 - clientId
-- saleDate
-- totalAmount
+- sellerId
+- createdAt
 - paymentMethod
-- loyaltyDiscountApplied
+- grossTotal
+- discount
+- finalTotal
+- items
+
+---
 
 ### SaleItems
 
 Representam os itens que compõem uma venda.
 
-**Campos principais:**
+No modelo OpenAPI e Firebase os itens são armazenados internamente dentro da venda.
 
-- id
-- saleId
+Para fins de modelagem ORM relacional, os itens podem ser representados pela entidade lógica SaleItems.
+
+Campos principais:
+
 - productId
+- title
 - quantity
 - unitPrice
-- subtotal
 
 ---
 
 ## 3. Relacionamentos
 
-### Client → Sales
-
-Uma venda pode ou não estar associada a um cliente cadastrado.
-
-Quando associada:
-
-```text
-Client 1:N Sales
-```
-
-O campo `clientId` é opcional, permitindo vendas para clientes ocasionais não cadastrados.
-
-### User → Sales
-
-Cada venda deve possuir um usuário responsável pelo registro da operação.
+### Users → Sales
 
 ```text
 User 1:N Sales
 ```
 
-### Sales → SaleItems
+Um vendedor pode registrar diversas vendas.
 
-Uma venda pode possuir um ou mais itens.
+---
 
-```text
-Sale 1:N SaleItems
-```
-
-### Products → SaleItems
-
-Um produto pode participar de diversas vendas ao longo do tempo.
+### Clients → Sales
 
 ```text
-Product 1:N SaleItems
+Client 1:N Sales
 ```
 
-### Relacionamento Conceitual
+Toda venda deve possuir um cliente associado.
 
-Do ponto de vista do negócio:
+O campo clientId é obrigatório conforme definido no contrato OpenAPI.
+
+---
+
+### Sales → Products
+
+Do ponto de vista do domínio:
 
 ```text
 Sale N:N Products
 ```
 
-Para fins de modelagem relacional e ORM, essa relação deve ser implementada através da entidade intermediária **SaleItems**.
+Para modelagem ORM:
+
+```text
+Sale 1:N SaleItems
+
+Product 1:N SaleItems
+```
 
 ---
 
 ## 4. Programa de Fidelidade
 
-A participação no programa de fidelidade é opcional.
-
-### Campo de Controle
-
-```text
-loyaltyProgramActive (boolean)
-```
+Todos os clientes cadastrados participam do programa de fidelidade.
 
 ### Regras
 
-- Apenas clientes cadastrados podem participar do programa.
-- O cliente deve possuir `loyaltyProgramActive = true`.
-- Clientes que não participam do programa mantêm `loyaltyPoints = 0`.
-- Cada venda válida gera 10 pontos para o cliente participante.
-- Ao atingir 100 pontos acumulados, o cliente recebe um desconto de 10%.
-- Após a utilização do benefício, a pontuação acumulada é reiniciada para 0.
-- Apenas vendas vinculadas a um cliente cadastrado geram pontuação.
-- Vendas sem cliente associado não geram pontuação.
-- O campo `loyaltyDiscountApplied` registra se o desconto foi utilizado naquela venda.
+- Cada venda registrada credita pontos automaticamente ao cliente.
+- O saldo de pontos é armazenado no campo loyaltyPoints.
+- Ao atingir 100 pontos, o cliente pode utilizar um desconto de 10%.
+- O desconto aplicado é registrado no campo discount da venda.
+- Após utilização do benefício, a pontuação do cliente deve ser atualizada conforme as regras do sistema.
+- O controle de pontos deve ocorrer automaticamente durante o processamento das vendas.
 
 ---
 
 ## 5. Controle de Estoque
 
-Os produtos possuem controle individual de estoque.
+Todos os produtos possuem estoque controlado.
 
 ### Regras
 
 - Toda venda reduz automaticamente o estoque dos produtos vendidos.
-- O sistema não deve permitir estoque negativo.
-- Produtos sem estoque não podem ser adicionados a novas vendas.
-- A exclusão de um produto não deve ser permitida caso existam vendas vinculadas ao produto.
-- O estoque deve refletir a quantidade física disponível para venda.
-- O histórico de vendas deve permanecer preservado mesmo após alterações cadastrais do produto.
+- Não é permitido estoque negativo.
+- Produtos sem estoque disponível não podem ser vendidos.
+- Tentativas de venda sem estoque devem retornar:
+
+```http
+409 Conflict
+```
+
+com código:
+
+```text
+INSUFFICIENT_STOCK
+```
+
+- Produtos vinculados a vendas históricas não podem ser excluídos.
 
 ---
 
@@ -173,172 +197,106 @@ Os produtos possuem controle individual de estoque.
 
 ### Produtos
 
+- Devem possuir código interno obrigatório (code).
 - Devem possuir ISBN válido.
 - Devem possuir preço maior que zero.
 - Devem possuir estoque maior ou igual a zero.
-- Devem possuir título e autor informados.
 
 ### Clientes
 
-- Podem participar ou não do programa de fidelidade.
-- Acumulam pontos apenas quando participam do programa.
-- Podem existir vendas sem cliente vinculado.
+- Devem possuir CPF válido.
+- Devem possuir data de nascimento informada.
+- Participam do programa de fidelidade.
+- Acumulam pontos automaticamente conforme as vendas.
 
 ### Vendas
 
-- Devem possuir pelo menos um item.
-- Devem possuir um usuário responsável pela operação.
-- Podem ou não possuir cliente associado.
-- Devem registrar a forma de pagamento utilizada.
-- Devem calcular automaticamente o valor total da venda.
+- Devem possuir cliente obrigatório.
+- Devem possuir vendedor obrigatório.
+- Devem possuir ao menos um item.
+- Devem registrar forma de pagamento.
+- Devem calcular grossTotal, discount e finalTotal.
 - Devem atualizar o estoque dos produtos envolvidos.
-- Devem registrar a data e hora da transação.
 
-### Itens da Venda
+### Imutabilidade das Vendas
 
-- Devem possuir produto válido.
-- Devem possuir quantidade maior que zero.
-- Devem registrar o preço unitário praticado no momento da venda.
-- Devem registrar o subtotal do item para preservação histórica.
+Após registradas:
 
-### Usuários
+- não podem ser alteradas;
+- não podem ser excluídas.
 
-- São responsáveis pelo registro das vendas.
-- Possuem perfis de acesso definidos pelo sistema.
-- Devem utilizar autenticação para acessar funcionalidades protegidas.
+A venda representa um registro histórico permanente.
 
+## Histórico de Compras por Cliente
+
+A API disponibiliza o endpoint:
+
+GET /api/v1/clients/{clientId}/sales
+
+que permite consultar o histórico de vendas associado a um cliente específico.
+
+O recurso suporta paginação e segue os mesmos padrões definidos para os demais endpoints da API.
 ---
 
 ## 7. Autenticação e Autorização
 
-A API utiliza autenticação baseada em JWT (JSON Web Token).
+A API utiliza autenticação JWT.
 
-### Endpoints de Autenticação
+Endpoints:
 
-- POST /auth/login
-- POST /auth/refresh
-- POST /auth/logout
-- GET /auth/me
+- POST /api/v1/auth/login
+- POST /api/v1/auth/refresh
+- POST /api/v1/auth/logout
+- GET /api/v1/auth/me
 
-### Cabeçalho de Autorização
-
-```http
-Authorization: Bearer <token>
-```
-
-### Perfis de Acesso
+### Perfis
 
 #### ADMIN
 
-Permissões:
+Permissões administrativas completas.
 
-- Gerenciar usuários
-- Gerenciar produtos
-- Gerenciar clientes
-- Gerenciar vendas
-- Executar operações administrativas
-- Consultar relatórios
-- Alterar permissões de acesso
+#### SELLER
 
-#### EMPLOYEE
-
-Permissões:
-
-- Consultar produtos
-- Consultar clientes
-- Registrar vendas
-- Consultar vendas
-- Atualizar informações operacionais permitidas
+Permissões de operação e registro de vendas.
 
 ---
 
-## 8. Persistência de Dados
+## 8. Persistência
 
-A aplicação original utiliza Firebase Firestore como mecanismo principal de persistência.
+O sistema original utiliza Firebase Firestore.
 
-Para fins de modelagem arquitetural, geração automatizada de código e aplicação dos conceitos de ORM estudados na disciplina, os relacionamentos do domínio também são descritos em formato compatível com modelagem relacional.
-
-Essa abordagem permite utilizar o mesmo domínio de negócio em diferentes estratégias de persistência sem alterar as regras funcionais da aplicação.
+Para fins de modelagem arquitetural e aplicação dos conceitos de ORM estudados na disciplina, os relacionamentos também são representados através de uma modelagem relacional compatível com SQLAlchemy 2.0.
 
 ---
 
-## 9. Testes Funcionais Esperados
+## 9. Health Checks
 
-### Autenticação
+A API disponibiliza:
 
-- Login válido
-- Login inválido
-- Token expirado
-- Token ausente
-- Refresh token
-- Logout
+```http
+GET /health/live
+```
 
-### Produtos
+Validação de disponibilidade da aplicação.
 
-- Cadastro de produto
-- Atualização de produto
-- Exclusão de produto
-- Consulta por ISBN
-- Controle de estoque
-- Bloqueio de estoque negativo
+```http
+GET /health/ready
+```
 
-### Clientes
-
-- Cadastro de cliente
-- Atualização de cliente
-- Participação no programa de fidelidade
-- Acúmulo de pontos
-- Aplicação de desconto
-
-### Vendas
-
-- Registro de venda
-- Associação de produtos
-- Associação opcional de cliente
-- Aplicação de desconto por fidelidade
-- Atualização automática de estoque
-- Cálculo de valor total
-
-### Itens da Venda
-
-- Inclusão de itens
-- Cálculo de subtotal
-- Validação de quantidade
-- Validação de estoque disponível
-
-### Erros da API
-
-- 400 Bad Request
-- 401 Unauthorized
-- 403 Forbidden
-- 404 Not Found
-- 409 Conflict
-- 422 Validation Error
+Validação de prontidão e acesso às dependências.
 
 ---
 
 ## 10. Fonte da Verdade
 
-A evolução da Bookstore API deve seguir a metodologia SDD:
+Os seguintes artefatos compõem a documentação oficial do projeto:
 
 ```text
-Constitution
-├── STYLEGUIDE.md
-└── AGENTS.md
-
-Specify
-├── Bookstore API.openapi.yaml
-└── SPEC.md
-
-Plan
-└── PLAN.md
-
-Implement
-├── Models
-├── Schemas
-├── Routers
-├── Security
-└── Tests
+AGENTS.md
+STYLEGUIDE.md
+SPEC.md
+PLAN.md
+apidog/Bookstore API.openapi.yaml
 ```
 
-Qualquer alteração de regra de negócio deve ser refletida primeiro na especificação e somente depois na implementação.
+Qualquer alteração de regra de negócio deve ser refletida primeiramente no OpenAPI e na documentação antes da implementação.
