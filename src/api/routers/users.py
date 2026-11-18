@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from src.api.database import get_db
 from src.api.exceptions import ConflictException, NotFoundException
-from src.api.models import UserModel
+from src.api.models import SaleModel, UserModel
 from src.api.schemas import (
     CreateUserDTO,
     PaginatedUsersResponse,
@@ -263,3 +263,65 @@ async def update_user(
         status_code=status.HTTP_200_OK,
         headers=dict(response.headers),
     )
+
+
+@router.delete(
+    "/{id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remover usuário / vendedor",
+    description="Exclui o operador da API. Retorna 409 se houver vendas vinculadas ao vendedor ou precondição falhar.",
+)
+async def delete_user(
+    id: str,
+    request: Request,
+    response: Response,
+    if_match: Optional[str] = Header(default=None, alias="If-Match"),
+    current_admin: UserModel = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Remove usuário com validação de integridade referencial e auditoria de vendas."""
+    _apply_common_headers(request, response)
+
+    user = db.query(UserModel).filter(UserModel.id == id).first()
+    if not user:
+        raise NotFoundException(
+            title="Recurso Inexistente",
+            detail="O usuário com o identificador informado não foi localizado.",
+            code="NOT_FOUND",
+        )
+
+    # Impede autoexclusão da própria conta do administrador autenticado
+    if user.id == current_admin.id:
+        raise ConflictException(
+            title="Operação Não Permitida",
+            detail="O administrador não pode excluir a própria conta conectada na sessão.",
+            code="SELF_DELETION_FORBIDDEN",
+        )
+
+    # Concorrência otimista: valida se os dados do usuário sofreram alterações concorrentes
+    current_etag = _compute_user_etag(user)
+    verify_if_match(if_match, current_etag)
+
+    # Regra de Integridade: impede exclusão de vendedor/usuário com vendas vinculadas
+    sales_count = db.query(SaleModel).filter(SaleModel.seller_id == id).count()
+    if sales_count > 0:
+        raise ConflictException(
+            title="Recurso em Uso",
+            detail=f"O vendedor '{user.name}' possui {sales_count} venda(s) registrada(s) e não pode ser excluído do sistema. Utilize a inativação cadastral (active: false).",
+            code="RESOURCE_IN_USE",
+            type_uri="https://api.bookstore.dev/errors/resource-in-use",
+        )
+
+    try:
+        db.delete(user)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise ConflictException(
+            title="Recurso em Uso",
+            detail=f"Não é possível remover o vendedor '{user.name}' devido a vínculos no histórico de vendas.",
+            code="RESOURCE_IN_USE",
+            type_uri="https://api.bookstore.dev/errors/resource-in-use",
+        )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers=dict(response.headers))

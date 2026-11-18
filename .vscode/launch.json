@@ -1,0 +1,11 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "msedge",
+            "request": "launch",
+            "name": "Demonstração Bookstore API (P2)",
+            "file": "${workspaceFolder}\\demo\\index.html"
+        }
+    ]
+}

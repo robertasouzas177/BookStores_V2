@@ -55,8 +55,8 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def seed_initial_data(db: Session) -> None:
-    """Popula o banco com seeds iniciais conforme os passos 3.28 a 3.31 do PLAN.md."""
-    from src.api.models import ClientModel, ProductModel, UserModel
+    """Popula o banco com seeds iniciais conforme a especificação oficial e regras da P2."""
+    from src.api.models import ClientModel, ProductModel, SaleItemModel, SaleModel, UserModel
 
     # 1. Usuários iniciais (ADMIN e SELLER)
     admin_exists = db.query(UserModel).filter(UserModel.email == "admin@api.com").first()
@@ -65,7 +65,6 @@ def seed_initial_data(db: Session) -> None:
             id="SDMXDsjJtqcqK1nWnrk0YjQDqPY2",
             name="Administrador do Sistema",
             email="admin@api.com",
-            # Hash reservado para 'Sup3rS3cr3t!' (compatível com a fase 4 de segurança)
             password_hash="$2b$12$e8x8R7yMvLpKp0WvE7K8e.vQ5c6yW0QzH4qE9X8j5K2Z4W6v8b0mK",
             phone="16999999999",
             active=True,
@@ -117,6 +116,20 @@ def seed_initial_data(db: Session) -> None:
         )
         db.add(sample_product_2)
 
+    product_exists_3 = db.query(ProductModel).filter(ProductModel.id == "PRD3c7Q4TCYGcsuPch90").first()
+    if not product_exists_3:
+        sample_product_3 = ProductModel(
+            id="PRD3c7Q4TCYGcsuPch90",
+            code="3w4H2L70TEklQCMgptdc",
+            title="Fundação",
+            author="Isaac Asimov",
+            isbn="9788576574507",
+            price=72,
+            stock=0,  # Produto esgotado para teste de inStock=false e 409 INSUFFICIENT_STOCK
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(sample_product_3)
+
     # 3. Clientes iniciais
     client_exists = db.query(ClientModel).filter(ClientModel.id == "8NV1c7Q4TCYGcsuPch8I").first()
     if not client_exists:
@@ -127,13 +140,59 @@ def seed_initial_data(db: Session) -> None:
             phone="16988887777",
             cpf="52998224725",
             birth_date="01/02/2000",
-            loyalty_points=40,
+            loyalty_points=100,  # Cliente VIP (>=100 pts) elegível a 10% de desconto
             active=True,
             created_at=datetime.now(timezone.utc),
         )
         db.add(sample_client)
+    else:
+        # Garante que Ana Souza tenha 100 pontos para demonstrar benefício VIP
+        if client_exists.loyalty_points < 100:
+            client_exists.loyalty_points = 100
+
+    client_exists_2 = db.query(ClientModel).filter(ClientModel.id == "CLI2c7Q4TCYGcsuPch02").first()
+    if not client_exists_2:
+        sample_client_2 = ClientModel(
+            id="CLI2c7Q4TCYGcsuPch02",
+            name="Carlos Eduardo Santos",
+            email="carlos.santos@example.com",
+            phone="16977776666",
+            cpf="11144477735",
+            birth_date="15/05/1995",
+            loyalty_points=20,
+            active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(sample_client_2)
 
     db.commit()
+
+    # 4. Venda inicial vinculada para demonstrar histórico imutável e bloqueio 409
+    sale_exists = db.query(SaleModel).filter(SaleModel.id == "SAL1c7Q4TCYGcsuPch01").first()
+    if not sale_exists:
+        initial_sale = SaleModel(
+            id="SAL1c7Q4TCYGcsuPch01",
+            client_id="8NV1c7Q4TCYGcsuPch8I",
+            client_name="Ana Souza",
+            seller_id="SDMXDsjJtqcqK1nWnrk0YjQDqPY2",
+            seller_name="Administrador do Sistema",
+            payment_method="Dinheiro",
+            gross_total=80.0,
+            discount=0,
+            final_total=80.0,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(initial_sale)
+
+        initial_item = SaleItemModel(
+            sale_id="SAL1c7Q4TCYGcsuPch01",
+            product_id="KIYBXACS6uVj5DbKEsPQ",
+            title="Duna",
+            quantity=1,
+            unit_price=80.0,
+        )
+        db.add(initial_item)
+        db.commit()
 
 
 def init_db() -> None:

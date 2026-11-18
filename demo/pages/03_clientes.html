@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tela 3: Clientes & Programa de Fidelidade — Bookstore API (P2)</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+
+  <!-- TopBar Injetada via Navbar Component -->
+  <header class="topbar" id="navbarContainer"></header>
+
+  <main class="main-wrapper">
+
+    <!-- Header da Tela com Navegação Contínua -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2 class="card-title" style="font-size:1.6rem; color:#38bdf8;">👥 Módulo 2: Clientes & Programa de Fidelidade</h2>
+        <p style="color:var(--text-muted); font-size:0.88rem;">
+          Endpoints: <code>GET, POST, PATCH, DELETE /api/v1/clients</code> &bull; Sub-recurso: <code>GET /clients/{id}/sales</code> &bull; Regra: <code>100 pts = 10% Desconto</code>
+        </p>
+      </div>
+      <button class="btn-back-dashboard" onclick="window.location.href='../index.html'">
+        &larr; Voltar ao Dashboard
+      </button>
+    </div>
+
+    <!-- Presets de Demonstração Rápida para a Banca (P2) -->
+    <div class="presets-box" style="margin-bottom:18px;">
+      <div class="presets-label">⚡ Demonstrações Obrigatórias para a Banca (Clique para executar em 1 clique):</div>
+      <div class="presets-grid">
+        <button type="button" class="btn-preset" onclick="quickDemoClient('search_name')" style="border-left:4px solid #38bdf8;" title="GET /clients?search=ana">
+          🔍 1. Busca por Nome ("Ana")
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoClient('search_cpf')" style="border-left:4px solid #38bdf8;" title="GET /clients?search=52998224725">
+          🪪 2. Busca por CPF
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoClient('vip_discount')" style="border-left:4px solid #eab308;" title="Cliente com 100 pontos">
+          🏆 3. Cliente VIP (100 Pts / 10% Desc.)
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoClient('view_history')" style="border-left:4px solid #10b981;" title="GET /clients/{id}/sales">
+          🧾 4. Histórico de Compras
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoClient('create_modal')" style="border-left:4px solid #10b981;" title="POST /clients">
+          ➕ 5. Cadastrar Novo Cliente
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoClient('demo_etag_304')" style="border-left:4px solid #06b6d4;" title="If-None-Match com ETag atual">
+          ⚡ 6. Cache ETag (304)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoClient('error_resource_in_use')" style="border-left:4px solid #ef4444;" title="DELETE de cliente com histórico">
+          🚫 7. Exclusão (409 RESOURCE_IN_USE)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoClient('error_cpf_invalid')" style="border-left:4px solid #ec4899;" title="POST com CPF inválido">
+          ❌ 8. CPF Inválido (422)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoClient('error_duplicate')" style="border-left:4px solid #f97316;" title="POST com CPF já existente">
+          ⚠️ 9. Conflito CPF (409 DUPLICATE)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoClient('demo_if_match_412')" style="border-left:4px solid #f59e0b;" title="PATCH com If-Match desatualizado">
+          ⚠️ 10. Concorrência (412)
+        </button>
+      </div>
+    </div>
+
+    <!-- Barra de Filtros, Pesquisa e Ações -->
+    <div class="filter-bar">
+      <!-- Campo Busca Textual (search) -->
+      <div class="filter-group">
+        <label for="clientSearchInput" style="font-size:0.85rem; font-weight:700; color:var(--text-muted);">Buscar:</label>
+        <div style="display:flex; gap:6px;">
+          <input
+            type="text"
+            id="clientSearchInput"
+            class="form-control"
+            placeholder="Nome, CPF ou E-mail..."
+            style="padding:6px 12px; font-size:0.88rem; width:240px;"
+            onkeydown="if(event.key==='Enter') applyClientFilters()"
+          />
+          <button type="button" class="btn-page" onclick="applyClientFilters()">Filtrar</button>
+          <button type="button" class="btn-page" onclick="clearClientSearch()" title="Limpar busca">✕</button>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-left:auto;">
+        <button type="button" class="btn-submit" style="padding:6px 14px; font-size:0.85rem;" onclick="openCreateClientModal()">
+          ➕ Novo Cliente (POST)
+        </button>
+        <button type="button" class="btn-page" onclick="loadClients(false)" title="Recarregar lista">
+          🔄 Atualizar
+        </button>
+      </div>
+    </div>
+
+    <!-- Layout Central Master-Detail -->
+    <div class="products-layout">
+
+      <!-- Coluna Esquerda: Tabela de Clientes (Master) -->
+      <div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Nome &bull; E-mail</th>
+                <th style="width:130px;">CPF</th>
+                <th style="width:130px;">Telefone</th>
+                <th style="width:100px; text-align:center;">Fidelidade</th>
+                <th style="width:80px; text-align:center;">Status</th>
+                <th style="width:110px; text-align:center;">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="clientsTableBody">
+              <tr>
+                <td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted);">
+                  Carregando lista de clientes...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Controles e Metadados de Paginação Detalhados -->
+        <div class="pagination-controls" style="flex-wrap:wrap; gap:10px;">
+          <button type="button" id="btnPrevPage" class="btn-page" onclick="changeClientPage(-1)" disabled>
+            &larr; Anterior
+          </button>
+
+          <div style="font-size:0.85rem; color:var(--text-muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span>Página: <strong id="metaPage" style="color:#f8fafc;">1</strong> / <span id="metaTotalPages">1</span></span>
+            <span>&bull;</span>
+            <span>Limite: <strong id="metaLimit" style="color:#38bdf8;">10</strong></span>
+            <span>&bull;</span>
+            <span>Total: <strong id="metaTotalItems" style="color:#10b981;">0</strong> clientes</span>
+            <span>&bull;</span>
+            <span>Tem Próxima (hasNext): <strong id="metaHasNext" style="color:#94a3b8;">Não</strong></span>
+          </div>
+
+          <button type="button" id="btnNextPage" class="btn-page" onclick="changeClientPage(1)" disabled>
+            Próxima &rarr;
+          </button>
+        </div>
+      </div>
+
+      <!-- Coluna Direita: Painel de Detalhes & Cartão Fidelidade (Detail) -->
+      <div class="product-detail-box">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+          <h3 style="font-size:1.05rem; font-weight:700; color:#38bdf8;">Ficha do Cliente</h3>
+          <span id="detailBadgeStatus" class="stock-badge high">Ativo</span>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">Nome Completo:</div>
+          <div id="detailName" class="detail-value" style="font-size:1.15rem; color:#ffffff;">Nenhum cliente selecionado</div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">E-mail:</div>
+          <div id="detailEmail" class="detail-value" style="color:#cbd5e1; word-break:break-all;">—</div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="detail-field">
+            <div class="detail-label">CPF (formatado):</div>
+            <div id="detailCpf" class="detail-value" style="font-family:var(--font-mono); font-size:0.85rem; color:#93c5fd;">—</div>
+          </div>
+          <div class="detail-field">
+            <div class="detail-label">Telefone:</div>
+            <div id="detailPhone" class="detail-value" style="font-family:var(--font-mono); font-size:0.85rem;">—</div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="detail-field">
+            <div class="detail-label">Nascimento:</div>
+            <div id="detailBirthDate" class="detail-value" style="font-size:0.9rem; color:#cbd5e1;">—</div>
+          </div>
+          <div class="detail-field">
+            <div class="detail-label">Cadastrado em:</div>
+            <div id="detailCreatedAt" class="detail-value" style="font-size:0.8rem; color:#94a3b8;">—</div>
+          </div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">ID Firestore (Doc):</div>
+          <div id="detailId" class="detail-value" style="font-family:var(--font-mono); font-size:0.75rem; color:#38bdf8; word-break:break-all;">—</div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">ETag Individual (Versão):</div>
+          <div id="detailETag" class="detail-value" style="font-family:var(--font-mono); font-size:0.75rem; color:#e2e8f0; word-break:break-all; background:#030712; padding:4px 8px; border-radius:4px; border:1px solid #1e293b;">—</div>
+        </div>
+
+        <!-- ====================================================================
+             CARTÃO GAMIFICADO DO PROGRAMA DE FIDELIDADE
+             ==================================================================== -->
+        <div style="background:#0f172a; border:2px solid #334155; border-radius:8px; padding:14px; margin-top:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.8rem; font-weight:800; color:#f8fafc; text-transform:uppercase; letter-spacing:0.5px;">
+              🏆 Programa de Fidelidade
+            </span>
+            <span id="detailTierBadge" class="tier-badge gold">🥇 Ouro (100+)</span>
+          </div>
+
+          <div style="display:flex; align-items:baseline; gap:6px; margin:8px 0 4px 0;">
+            <span id="detailLoyaltyPoints" style="font-size:1.8rem; font-weight:900; color:#f59e0b;">100</span>
+            <span style="font-size:0.85rem; color:var(--text-muted); font-weight:700;">pontos acumulados</span>
+          </div>
+
+          <!-- Barra de Progresso até 100 pontos -->
+          <div class="loyalty-progress-container">
+            <div id="detailProgressBar" class="loyalty-progress-bar" style="width: 100%;"></div>
+          </div>
+
+          <!-- Banner Informativo de Desconto -->
+          <div id="detailDiscountBanner" style="font-size:0.78rem; font-weight:700; padding:6px 8px; border-radius:4px; margin-top:6px; text-align:center; background:#422006; color:#fef08a; border:1px solid #ca8a04;">
+            ⭐ ELEGÍVEL A 10% DE DESCONTO NO TOTAL DA VENDA!
+          </div>
+
+          <!-- Ação Principal de Integração com Nova Venda -->
+          <button type="button" class="btn-submit" style="width:100%; margin-top:12px; padding:10px; font-size:0.9rem; background:#059669;" onclick="startSaleWithSelectedClient()">
+            🛒 Iniciar Venda com este Cliente &rarr;
+          </button>
+        </div>
+
+        <!-- Botões de Ação Cadastral -->
+        <div style="display:flex; gap:8px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px;">
+          <button type="button" class="btn-page" style="flex:1; padding:8px;" onclick="openUpdateClientModal()">
+            ✏️ Atualizar (PATCH)
+          </button>
+          <button type="button" class="btn-logout" style="flex:1; padding:8px; text-align:center;" onclick="handleDeleteClient()">
+            🗑️ Excluir (DELETE)
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================================================
+         PAINEL DE HISTÓRICO DE COMPRAS (GET /api/v1/clients/{clientId}/sales)
+         ======================================================================== -->
+    <div class="card" style="margin-top:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <div>
+          <h3 style="font-size:1.15rem; color:#f1f5f9; display:flex; align-items:center; gap:8px;">
+            <span>🧾 Histórico de Compras do Cliente</span>
+            <code id="historyClientIdLabel" style="font-size:0.8rem; color:#38bdf8;">—</code>
+          </h3>
+          <p style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">
+            Sub-recurso hierárquico: <code>GET /api/v1/clients/{clientId}/sales</code>
+          </p>
+        </div>
+        <button type="button" class="btn-page" onclick="loadClientSalesHistory()">
+          🔄 Atualizar Histórico
+        </button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:180px;">ID da Venda</th>
+              <th style="width:160px;">Data & Hora</th>
+              <th>Itens Comprados</th>
+              <th style="width:120px;">Vendedor</th>
+              <th style="width:100px;">Total Bruto</th>
+              <th style="width:100px;">Desconto</th>
+              <th style="width:110px;">Valor Final</th>
+            </tr>
+          </thead>
+          <tbody id="clientSalesTableBody">
+            <tr>
+              <td colspan="7" style="text-align:center; padding:18px; color:var(--text-muted);">
+                Selecione um cliente para carregar seu histórico de compras.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========================================================================
+         PAINEL TÉCNICO OBRIGATÓRIO (OBSERVABILIDADE REST E CONTRATOS RFC 9457)
+         ======================================================================== -->
+    <div class="tech-panel" style="margin-top:24px;">
+      <div class="tech-panel-header">
+        <h3 style="font-size:1.05rem; color:#f1f5f9;">⚙️ Painel Técnico & Observabilidade REST (Clientes)</h3>
+        <span id="cliTechStatusBadge" class="role-badge" style="background:#064e3b; border-color:#059669; color:#6ee7b7;">200 OK</span>
+      </div>
+
+      <div class="tech-grid">
+        <!-- 1. Status HTTP -->
+        <div class="tech-box">
+          <div class="tech-box-title">Status HTTP</div>
+          <div id="cliTechHttpStatus" style="font-size:1.25rem; font-weight:800; color:#10b981;">HTTP 200 OK</div>
+          <div id="cliTechStatusDetail" style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Operação concluída com sucesso.</div>
+        </div>
+
+        <!-- 2. ETag Atual -->
+        <div class="tech-box">
+          <div class="tech-box-title">ETag Atual (Coleção / Recurso)</div>
+          <div id="cliTechETag" class="tech-box-code">—</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Validação condicional de cache e concorrência.</div>
+        </div>
+
+        <!-- 3. If-Match / If-None-Match -->
+        <div class="tech-box">
+          <div class="tech-box-title">Cabeçalhos Condicionais</div>
+          <div style="font-size:0.8rem; line-height:1.6;">
+            <div><strong>If-Match:</strong> <code id="cliTechIfMatch" style="color:#fde68a;">(Nenhum)</code></div>
+            <div><strong>If-None-Match:</strong> <code id="cliTechIfNoneMatch" style="color:#7dd3fc;">(Nenhum)</code></div>
+          </div>
+        </div>
+
+        <!-- 4. X-Request-Id -->
+        <div class="tech-box">
+          <div class="tech-box-title">X-Request-Id (Trace Context)</div>
+          <div id="cliTechRequestId" class="tech-box-code" style="color:#38bdf8;">8NV1c7Q4TCYGcsuPch8I</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Rastreamento distribuído W3C de ponta a ponta.</div>
+        </div>
+
+        <!-- 5. RFC 9457 Code -->
+        <div class="tech-box">
+          <div class="tech-box-title">Código RFC 9457</div>
+          <div id="cliTechRfcCode" style="font-family:var(--font-mono); font-size:1.15rem; font-weight:700; color:#38bdf8;">NENHUM ERRO</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Código de erro estável para automação.</div>
+        </div>
+
+        <!-- 6. Última Operação -->
+        <div class="tech-box">
+          <div class="tech-box-title">Última Operação Executada</div>
+          <div id="cliTechLastOperation" style="font-family:var(--font-mono); font-size:0.95rem; font-weight:700; color:#f8fafc;">GET /api/v1/clients</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Método e rota despachados ao servidor.</div>
+        </div>
+      </div>
+
+      <!-- Box de Exibição de Resposta RFC 9457 em caso de erro -->
+      <div id="cliRfcErrorBox" class="rfc-box hidden" style="margin-top:16px;">
+        <div class="rfc-box-header">
+          <span class="rfc-box-title">🚨 Resposta RFC 9457 (Problem Details: application/problem+json)</span>
+          <span id="cliRfcStatusTag" class="role-badge" style="background:#7f1d1d; border-color:#dc2626; color:#fca5a5;">409 CONFLICT</span>
+        </div>
+        <pre id="cliRfcErrorJson" class="rfc-json-content"></pre>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================
+       MODAL 1: CADASTRO DE NOVO CLIENTE (POST /api/v1/clients)
+       ======================================================================== -->
+  <div id="createClientModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+        <h3 style="font-size:1.2rem; color:#f1f5f9;">Cadastrar Novo Cliente (POST)</h3>
+        <button type="button" class="btn-toggle-pass" onclick="closeCreateClientModal()">✕</button>
+      </div>
+
+      <form onsubmit="handleCreateClientSubmit(event)">
+        <div class="form-group">
+          <label for="createNameInput" class="form-label">Nome Completo *</label>
+          <input type="text" id="createNameInput" class="form-control" placeholder="ex: Juliana Ferreira Lima" required />
+        </div>
+
+        <div class="form-group">
+          <label for="createEmailInput" class="form-label">E-mail *</label>
+          <input type="email" id="createEmailInput" class="form-control" placeholder="ex: juliana.lima@email.com" required />
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label for="createCpfInput" class="form-label">CPF (11 dígitos) *</label>
+            <input type="text" id="createCpfInput" class="form-control" placeholder="Apenas números" maxlength="14" required />
+          </div>
+          <div class="form-group">
+            <label for="createPhoneInput" class="form-label">Telefone (com DDD) *</label>
+            <input type="text" id="createPhoneInput" class="form-control" placeholder="ex: 16988884444" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="createBirthDateInput" class="form-label">Data de Nascimento (DD/MM/AAAA) *</label>
+          <input type="text" id="createBirthDateInput" class="form-control" placeholder="DD/MM/AAAA" maxlength="10" required />
+        </div>
+
+        <div style="background:#0f172a; padding:10px; border-radius:6px; border:1px solid #1e293b; margin-bottom:16px; font-size:0.8rem; color:var(--text-muted);">
+          ℹ️ O cliente será cadastrado com <strong>0 pontos</strong> no Programa de Fidelidade.
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn-page" onclick="closeCreateClientModal()">Cancelar</button>
+          <button type="submit" id="btnSubmitCreateClient" class="btn-submit" style="width:auto; padding:10px 20px;">
+            Cadastrar Cliente (201)
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       MODAL 2: ATUALIZAÇÃO PARCIAL DE CLIENTE (PATCH /api/v1/clients/{id})
+       ======================================================================== -->
+  <div id="updateClientModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+        <h3 style="font-size:1.2rem; color:#f1f5f9;">Atualizar Cadastro (PATCH)</h3>
+        <button type="button" class="btn-toggle-pass" onclick="closeUpdateClientModal()">✕</button>
+      </div>
+
+      <form onsubmit="handleUpdateClientSubmit(event)">
+        <div class="form-group">
+          <label class="form-label">Cliente Selecionado:</label>
+          <div id="modalUpdateClientTitle" style="font-size:1rem; font-weight:700; color:#38bdf8; margin-bottom:12px;">—</div>
+        </div>
+
+        <div class="form-group">
+          <label for="updatePhoneInput" class="form-label">Telefone de Contato:</label>
+          <input type="text" id="updatePhoneInput" class="form-control" required />
+        </div>
+
+        <div class="form-group">
+          <label for="updateEmailInput" class="form-label">Endereço de E-mail:</label>
+          <input type="email" id="updateEmailInput" class="form-control" required />
+        </div>
+
+        <!-- Concorrência Otimista (If-Match) -->
+        <div style="background:#0f172a; border:1px solid #334155; padding:12px; border-radius:6px; margin-bottom:20px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            <input type="checkbox" id="checkIfMatchClient" checked style="width:16px; height:16px;" />
+            <label for="checkIfMatchClient" style="font-size:0.85rem; font-weight:600; color:#e2e8f0; cursor:pointer;">
+              Enviar cabeçalho <code>If-Match</code> (Concorrência Otimista)
+            </label>
+          </div>
+          <div style="font-size:0.75rem; color:var(--text-muted);">
+            ETag enviado: <code id="modalIfMatchClientValue" style="color:#38bdf8;">W/"..."</code>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:8px;">
+            <button type="button" class="btn-preset error" style="padding:4px 8px; font-size:0.75rem;" onclick="corruptClientIfMatch()">
+              ⚠️ Corromper ETag (Forçar 412)
+            </button>
+            <button type="button" class="btn-preset" style="padding:4px 8px; font-size:0.75rem; border-color:#38bdf8;" onclick="resetClientIfMatch()">
+              ↺ Restaurar ETag
+            </button>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn-page" onclick="closeUpdateClientModal()">Cancelar</button>
+          <button type="submit" class="btn-submit" style="width:auto; padding:10px 20px;">
+            Salvar Alterações (PATCH)
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <footer>
+    <div>
+      <strong>Bookstore API &bull; P2:</strong> <code>GET, POST, PATCH, DELETE /clients</code> | <code>Fidelidade</code> | <code>RFC 9457</code>
+    </div>
+    <div>
+      Apresentadora: <strong>Roberta Souza</strong> &bull; Engenharia de Software
+    </div>
+  </footer>
+
+  <script src="../components/session.js"></script>
+  <script src="../components/api.js"></script>
+  <script src="../components/navbar.js"></script>
+  <script>
+    // Validação de Sessão obrigatória
+    Session.requireAuth('01_login.html');
+
+    Navbar.render({
+      targetElementId: 'navbarContainer',
+      homeUrl: '../index.html',
+      loginUrl: '01_login.html'
+    });
+
+    const clientState = {
+      page: 1,
+      limit: 10,
+      search: '',
+      selectedClient: null,
+      collectionETag: 'W/"cli_col_init"',
+      lastIfMatch: '(Nenhum)',
+      lastIfNoneMatch: '(Nenhum)'
+    };
+
+    function formatCpf(cpf) {
+      if (!cpf) return '—';
+      const clean = String(cpf).replace(/\D/g, '');
+      if (clean.length === 11) {
+        return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+      }
+      return cpf;
+    }
+
+    function formatPhone(phone) {
+      if (!phone) return '—';
+      const clean = String(phone).replace(/\D/g, '');
+      if (clean.length === 11) {
+        return clean.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+      } else if (clean.length === 10) {
+        return clean.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
+      }
+      return phone;
+    }
+
+    function applyClientFilters() {
+      clientState.search = document.getElementById('clientSearchInput').value.trim();
+      clientState.page = 1;
+      loadClients(false);
+    }
+
+    function clearClientSearch() {
+      document.getElementById('clientSearchInput').value = '';
+      clientState.search = '';
+      clientState.page = 1;
+      loadClients(false);
+    }
+
+    function changeClientPage(delta) {
+      clientState.page += delta;
+      if (clientState.page < 1) clientState.page = 1;
+      loadClients(false);
+    }
+
+    async function loadClients(useIfNoneMatch = false) {
+      const ifNoneMatchValue = useIfNoneMatch ? clientState.collectionETag : null;
+      clientState.lastIfNoneMatch = ifNoneMatchValue || '(Nenhum)';
+      clientState.lastIfMatch = '(Nenhum)';
+
+      document.getElementById('cliTechIfNoneMatch').textContent = clientState.lastIfNoneMatch;
+      document.getElementById('cliTechIfMatch').textContent = clientState.lastIfMatch;
+      document.getElementById('cliRfcErrorBox').classList.add('hidden');
+
+      const result = await Api.getClients({
+        page: clientState.page,
+        limit: clientState.limit,
+        search: clientState.search,
+        ifNoneMatch: ifNoneMatchValue
+      });
+
+      if (result.status === 304) {
+        updateClientTechConsole(304, 'Not Modified', result.etag || clientState.collectionETag, result.requestId, 'NENHUM ERRO', 'Coleção não modificada (Cache 304 validado via If-None-Match).', 'GET /api/v1/clients (304)');
+        return;
+      }
+
+      if (result.ok) {
+        clientState.collectionETag = result.etag || clientState.collectionETag;
+        updateClientTechConsole(200, 'OK', clientState.collectionETag, result.requestId, 'NENHUM ERRO', 'Lista de clientes carregada com sucesso.', 'GET /api/v1/clients');
+        const items = (result.data && Array.isArray(result.data.data)) ? result.data.data : (Array.isArray(result.data) ? result.data : []);
+        const meta = (result.data && result.data.meta) ? result.data.meta : (result.meta || {});
+        renderClientsTable(items, meta);
+      }
+    }
+
+    function renderClientsTable(clients, meta) {
+      const tbody = document.getElementById('clientsTableBody');
+      tbody.innerHTML = '';
+
+      const totalItems = meta.totalItems !== undefined ? meta.totalItems : clients.length;
+      const totalPages = meta.totalPages || Math.ceil(totalItems / meta.limit) || 1;
+      const hasNext = meta.page < totalPages;
+
+      document.getElementById('metaPage').textContent = meta.page;
+      document.getElementById('metaTotalPages').textContent = totalPages;
+      document.getElementById('metaLimit').textContent = meta.limit;
+      document.getElementById('metaTotalItems').textContent = totalItems;
+      document.getElementById('metaHasNext').textContent = hasNext ? 'Sim' : 'Não';
+      document.getElementById('metaHasNext').style.color = hasNext ? '#10b981' : '#94a3b8';
+
+      document.getElementById('btnPrevPage').disabled = meta.page <= 1;
+      document.getElementById('btnNextPage').disabled = !hasNext;
+
+      if (!clients || clients.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:28px; color:var(--text-muted);">Nenhum cliente localizado para a busca informada.</td></tr>`;
+        return;
+      }
+
+      clients.forEach(c => {
+        const tr = document.createElement('tr');
+        if (clientState.selectedClient && clientState.selectedClient.id === c.id) {
+          tr.className = 'selected';
+        }
+        tr.onclick = () => selectClient(c);
+
+        let pointsBadge;
+        if (c.loyaltyPoints >= 100) {
+          pointsBadge = `<span class="tier-badge gold" title="Elegível a 10% de desconto!">⭐ ${c.loyaltyPoints} pts</span>`;
+        } else if (c.loyaltyPoints >= 50) {
+          pointsBadge = `<span class="tier-badge silver">${c.loyaltyPoints} pts</span>`;
+        } else {
+          pointsBadge = `<span class="tier-badge bronze">${c.loyaltyPoints} pts</span>`;
+        }
+
+        const statusBadge = c.active
+          ? `<span class="stock-badge high" style="padding:2px 8px; font-size:0.75rem;">Ativo</span>`
+          : `<span class="stock-badge zero" style="padding:2px 8px; font-size:0.75rem;">Inativo</span>`;
+
+        tr.innerHTML = `
+          <td>
+            <div style="font-weight:700; color:#f8fafc;">${c.name}</div>
+            <div style="font-size:0.8rem; color:var(--text-muted);">${c.email}</div>
+          </td>
+          <td><code style="font-size:0.82rem; color:#93c5fd;">${formatCpf(c.cpf)}</code></td>
+          <td style="font-size:0.85rem; color:#cbd5e1;">${formatPhone(c.phone)}</td>
+          <td style="text-align:center;">${pointsBadge}</td>
+          <td style="text-align:center;">${statusBadge}</td>
+          <td style="text-align:center;">
+            <button type="button" class="btn-page" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); selectClientById('${c.id}')">Ver</button>
+            <button type="button" class="btn-page" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); openUpdateClientModal('${c.id}')">✏️</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      if (!clientState.selectedClient && clients.length > 0) {
+        selectClient(clients[0]);
+      }
+    }
+
+    function selectClient(c) {
+      if (!c) return;
+      clientState.selectedClient = c;
+
+      document.querySelectorAll('#clientsTableBody tr').forEach(row => row.classList.remove('selected'));
+      document.getElementById('detailName').textContent = c.name;
+      document.getElementById('detailEmail').textContent = c.email;
+      document.getElementById('detailCpf').textContent = formatCpf(c.cpf);
+      document.getElementById('detailPhone').textContent = formatPhone(c.phone);
+      document.getElementById('detailBirthDate').textContent = c.birthDate || '—';
+      document.getElementById('detailId').textContent = c.id;
+
+      // Data de cadastro
+      let formattedDate = c.createdAt;
+      try {
+        const d = new Date(c.createdAt);
+        if (!isNaN(d.getTime())) {
+          formattedDate = d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR');
+        }
+      } catch (e) {}
+      document.getElementById('detailCreatedAt').textContent = formattedDate;
+
+      // ETag
+      const etag = c._etag || Api.computeClientETag(c);
+      document.getElementById('detailETag').textContent = etag;
+
+      // Status
+      const statusBadge = document.getElementById('detailBadgeStatus');
+      if (c.active) {
+        statusBadge.className = 'stock-badge high';
+        statusBadge.textContent = 'Ativo';
+      } else {
+        statusBadge.className = 'stock-badge zero';
+        statusBadge.textContent = 'Inativo';
+      }
+
+      // Fidelidade e Progresso
+      const pts = c.loyaltyPoints || 0;
+      document.getElementById('detailLoyaltyPoints').textContent = pts;
+
+      const tierBadge = document.getElementById('detailTierBadge');
+      const discountBanner = document.getElementById('detailDiscountBanner');
+      const progressBar = document.getElementById('detailProgressBar');
+
+      const pct = Math.min(100, Math.round((pts / 100) * 100));
+      progressBar.style.width = `${pct}%`;
+
+      if (pts >= 100) {
+        tierBadge.className = 'tier-badge gold';
+        tierBadge.textContent = '🥇 Ouro (100+)';
+        discountBanner.style.background = '#422006';
+        discountBanner.style.borderColor = '#ca8a04';
+        discountBanner.style.color = '#fef08a';
+        discountBanner.innerHTML = '⭐ ELEGÍVEL A 10% DE DESCONTO NO TOTAL DA VENDA!';
+      } else if (pts >= 50) {
+        tierBadge.className = 'tier-badge silver';
+        tierBadge.textContent = '🥈 Prata (50-99)';
+        discountBanner.style.background = '#0f172a';
+        discountBanner.style.borderColor = '#334155';
+        discountBanner.style.color = '#cbd5e1';
+        discountBanner.innerHTML = `Faltam <strong>${100 - pts} pontos</strong> para liberar o cupom de 10% de desconto.`;
+      } else {
+        tierBadge.className = 'tier-badge bronze';
+        tierBadge.textContent = '🥉 Bronze (0-49)';
+        discountBanner.style.background = '#0f172a';
+        discountBanner.style.borderColor = '#334155';
+        discountBanner.style.color = '#94a3b8';
+        discountBanner.innerHTML = `Faltam <strong>${100 - pts} pontos</strong> para liberar o cupom de 10% de desconto.`;
+      }
+
+      // Atualiza painel de histórico de compras do cliente
+      loadClientSalesHistory();
+    }
+
+    async function selectClientById(id) {
+      const res = await Api.getClientById(id);
+      if (res.ok && res.data) {
+        if (res.etag) res.data._etag = res.etag;
+        selectClient(res.data);
+        clientState.lastIfMatch = '(Nenhum)';
+        clientState.lastIfNoneMatch = '(Nenhum)';
+        document.getElementById('cliTechIfMatch').textContent = '(Nenhum)';
+        document.getElementById('cliTechIfNoneMatch').textContent = '(Nenhum)';
+        updateClientTechConsole(200, 'OK', res.etag, res.requestId, 'NENHUM ERRO', `GET /api/v1/clients/${id} executado com sucesso.`, `GET /api/v1/clients/${id}`);
+      }
+    }
+
+    async function loadClientSalesHistory() {
+      const c = clientState.selectedClient;
+      const tbody = document.getElementById('clientSalesTableBody');
+      const label = document.getElementById('historyClientIdLabel');
+
+      if (!c) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:18px; color:var(--text-muted);">Nenhum cliente selecionado.</td></tr>`;
+        label.textContent = '—';
+        return;
+      }
+
+      label.textContent = `${c.name} (${c.id})`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:18px; color:var(--text-muted);">Carregando histórico de vendas...</td></tr>`;
+
+      const res = await Api.getClientSales(c.id);
+      if (res.ok) {
+        const sales = res.data || [];
+        if (sales.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:18px; color:var(--text-muted);">Nenhuma compra registrada para este cliente.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = '';
+        sales.forEach(s => {
+          const tr = document.createElement('tr');
+          const itemsDesc = (s.items || []).map(i => `${i.title} (${i.quantity}x)`).join(', ') || 'Produtos diversos';
+
+          let dateFormatted = s.date;
+          try {
+            const d = new Date(s.date);
+            if (!isNaN(d.getTime())) {
+              dateFormatted = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR');
+            }
+          } catch (e) {}
+
+          tr.innerHTML = `
+            <td><code style="color:#38bdf8; font-size:0.8rem;">${s.id}</code></td>
+            <td style="font-size:0.82rem; color:#cbd5e1;">${dateFormatted}</td>
+            <td style="font-size:0.85rem; color:#f8fafc;">${itemsDesc}</td>
+            <td style="font-size:0.82rem; color:var(--text-muted);">${s.seller}</td>
+            <td>R$ ${s.grossTotal},00</td>
+            <td style="color:${s.discount > 0 ? '#f59e0b' : 'var(--text-muted)'}; font-weight:700;">
+              ${s.discount > 0 ? '- R$ ' + s.discount + ',00' : 'R$ 0,00'}
+            </td>
+            <td><strong style="color:#10b981;">R$ ${s.finalTotal},00</strong></td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+    }
+
+    function startSaleWithSelectedClient() {
+      const c = clientState.selectedClient;
+      if (!c) {
+        alert('Selecione um cliente para iniciar a venda.');
+        return;
+      }
+
+      // Salva no estado compartilhado da sessão
+      Session.setSelectedClient({
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        cpf: c.cpf,
+        birthDate: c.birthDate,
+        loyaltyPoints: c.loyaltyPoints,
+        eligibleForDiscount: c.loyaltyPoints >= 100,
+        discountPercentage: c.loyaltyPoints >= 100 ? 10 : 0,
+        active: c.active
+      });
+
+      // Redireciona para a Tela 4 (Nova Venda)
+      window.location.href = '04_vendas.html';
+    }
+
+    // ========================================================================
+    // MODAL DE CADASTRO (POST)
+    // ========================================================================
+    function openCreateClientModal() {
+      document.getElementById('createNameInput').value = '';
+      document.getElementById('createEmailInput').value = '';
+      document.getElementById('createPhoneInput').value = '';
+      document.getElementById('createCpfInput').value = '';
+      document.getElementById('createBirthDateInput').value = '';
+      document.getElementById('createClientModal').classList.remove('hidden');
+    }
+
+    function closeCreateClientModal() {
+      document.getElementById('createClientModal').classList.add('hidden');
+    }
+
+    async function handleCreateClientSubmit(e) {
+      e.preventDefault();
+      const name = document.getElementById('createNameInput').value.trim();
+      const email = document.getElementById('createEmailInput').value.trim();
+      const phone = document.getElementById('createPhoneInput').value.trim();
+      const cpf = document.getElementById('createCpfInput').value.trim();
+      const birthDate = document.getElementById('createBirthDateInput').value.trim();
+
+      const result = await Api.createClient({ name, email, phone, cpf, birthDate, active: true });
+
+      if (!result.ok) {
+        closeCreateClientModal();
+        renderClientRfcError(result.error, result.status, 'POST /api/v1/clients');
+      } else {
+        closeCreateClientModal();
+        loadClients(false);
+        selectClient(result.data);
+        updateClientTechConsole(201, 'Created', result.etag, result.requestId, 'NENHUM ERRO', `Cliente cadastrado com sucesso! Header Location: ${result.location}`, 'POST /api/v1/clients');
+      }
+    }
+
+    // ========================================================================
+    // MODAL DE ATUALIZAÇÃO (PATCH)
+    // ========================================================================
+    async function openUpdateClientModal(clientId) {
+      if (clientId) await selectClientById(clientId);
+      let c = clientState.selectedClient;
+      if (!c) {
+        alert('Selecione um cliente para editar.');
+        return;
+      }
+
+      if (!c._etag && c.id) {
+        const res = await Api.getClientById(c.id);
+        if (res.ok && res.data) {
+          if (res.etag) res.data._etag = res.etag;
+          selectClient(res.data);
+          c = res.data;
+        }
+      }
+
+      document.getElementById('modalUpdateClientTitle').textContent = `${c.name} (${formatCpf(c.cpf)})`;
+      document.getElementById('updatePhoneInput').value = c.phone;
+      document.getElementById('updateEmailInput').value = c.email;
+
+      resetClientIfMatch();
+      document.getElementById('checkIfMatchClient').checked = true;
+      document.getElementById('updateClientModal').classList.remove('hidden');
+    }
+
+    function closeUpdateClientModal() {
+      document.getElementById('updateClientModal').classList.add('hidden');
+    }
+
+    function corruptClientIfMatch() {
+      document.getElementById('modalIfMatchClientValue').textContent = 'W/"etag_desatualizado_corrompido_412"';
+    }
+
+    function resetClientIfMatch() {
+      const c = clientState.selectedClient;
+      if (c) {
+        const etag = c._etag || Api.computeClientETag(c);
+        document.getElementById('modalIfMatchClientValue').textContent = etag;
+      }
+    }
+
+    async function handleUpdateClientSubmit(e) {
+      e.preventDefault();
+      const c = clientState.selectedClient;
+      if (!c) return;
+
+      const phone = document.getElementById('updatePhoneInput').value.trim();
+      const email = document.getElementById('updateEmailInput').value.trim();
+      const useIfMatch = document.getElementById('checkIfMatchClient').checked;
+      const sentIfMatch = document.getElementById('modalIfMatchClientValue').textContent;
+
+      clientState.lastIfMatch = useIfMatch ? sentIfMatch : '(Nenhum)';
+      clientState.lastIfNoneMatch = '(Nenhum)';
+      document.getElementById('cliTechIfMatch').textContent = clientState.lastIfMatch;
+      document.getElementById('cliTechIfNoneMatch').textContent = '(Nenhum)';
+
+      const result = await Api.updateClient(c.id, { phone, email }, useIfMatch ? sentIfMatch : null);
+
+      if (!result.ok) {
+        closeUpdateClientModal();
+        renderClientRfcError(result.error, result.status, `PATCH /api/v1/clients/${c.id}`);
+      } else {
+        closeUpdateClientModal();
+        if (result.etag) result.data._etag = result.etag;
+        selectClient(result.data);
+        loadClients(false);
+        updateClientTechConsole(200, 'OK', result.etag, result.requestId, 'NENHUM ERRO', `Cadastro do cliente atualizado com sucesso via PATCH! Novo ETag: ${result.etag}`, `PATCH /api/v1/clients/${c.id}`);
+      }
+    }
+
+    // ========================================================================
+    // EXCLUSÃO (DELETE)
+    // ========================================================================
+    async function handleDeleteClient() {
+      const c = clientState.selectedClient;
+      if (!c) {
+        alert('Selecione um cliente para excluir.');
+        return;
+      }
+
+      if (Session.getRole() === 'SELLER') {
+        renderClientRfcError({
+          type: "https://api.bookstore.dev/errors/forbidden",
+          title: "Acesso Proibido",
+          status: 403,
+          detail: "Operadores com perfil SELLER não possuem permissão para excluir clientes.",
+          instance: `/api/v1/clients/${c.id}`,
+          code: "FORBIDDEN"
+        }, 403, `DELETE /api/v1/clients/${c.id}`);
+        return;
+      }
+
+      if (!confirm(`Deseja realmente excluir o cadastro do cliente "${c.name}"?`)) return;
+
+      const currentEtag = c._etag || Api.computeClientETag(c);
+      clientState.lastIfMatch = currentEtag;
+      clientState.lastIfNoneMatch = '(Nenhum)';
+      document.getElementById('cliTechIfMatch').textContent = currentEtag;
+      document.getElementById('cliTechIfNoneMatch').textContent = '(Nenhum)';
+
+      const result = await Api.deleteClient(c.id, currentEtag);
+
+      if (!result.ok) {
+        renderClientRfcError(result.error, result.status, `DELETE /api/v1/clients/${c.id}`);
+      } else {
+        clientState.selectedClient = null;
+        loadClients(false);
+        updateClientTechConsole(204, 'No Content', '—', result.requestId, 'NENHUM ERRO', 'Cliente excluído com sucesso (204 No Content).', `DELETE /api/v1/clients/${c.id}`);
+      }
+    }
+
+    // ========================================================================
+    // CONSOLE TÉCNICO & ERROS RFC 9457
+    // ========================================================================
+    function renderClientRfcError(problemJson, httpStatus, opDesc = 'Operação') {
+      updateClientTechConsole(httpStatus, problemJson.title || 'Error', clientState.collectionETag, '8NV1c7Q4TCYGcsuPch8I', problemJson.code || 'ERROR', problemJson.detail || 'Ocorreu um erro contratual.', opDesc);
+
+      const box = document.getElementById('cliRfcErrorBox');
+      const tag = document.getElementById('cliRfcStatusTag');
+      const json = document.getElementById('cliRfcErrorJson');
+
+      tag.textContent = `${httpStatus} ${problemJson.code || ''}`;
+      json.textContent = JSON.stringify(problemJson, null, 2);
+      box.classList.remove('hidden');
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function updateClientTechConsole(statusNum, statusTitle, etag, reqId, rfcCode, detailMsg, opDesc) {
+      const badge = document.getElementById('cliTechStatusBadge');
+      const statusElem = document.getElementById('cliTechHttpStatus');
+      const detailElem = document.getElementById('cliTechStatusDetail');
+      const etagElem = document.getElementById('cliTechETag');
+      const reqIdElem = document.getElementById('cliTechRequestId');
+      const rfcCodeElem = document.getElementById('cliTechRfcCode');
+      const opElem = document.getElementById('cliTechLastOperation');
+
+      statusElem.textContent = `HTTP ${statusNum} ${statusTitle}`;
+      detailElem.textContent = detailMsg;
+      etagElem.textContent = etag;
+      reqIdElem.textContent = reqId;
+      rfcCodeElem.textContent = rfcCode;
+      if (opDesc) opElem.textContent = opDesc;
+
+      if (statusNum >= 200 && statusNum < 300) {
+        badge.className = 'role-badge';
+        badge.style.background = '#064e3b';
+        badge.style.borderColor = '#059669';
+        badge.style.color = '#6ee7b7';
+        badge.textContent = `${statusNum} ${statusTitle}`;
+        statusElem.style.color = '#10b981';
+        rfcCodeElem.style.color = '#38bdf8';
+      } else if (statusNum === 304) {
+        badge.className = 'role-badge';
+        badge.style.background = '#0c4a6e';
+        badge.style.borderColor = '#0284c7';
+        badge.style.color = '#7dd3fc';
+        badge.textContent = '304 NOT MODIFIED';
+        statusElem.style.color = '#38bdf8';
+        rfcCodeElem.style.color = '#38bdf8';
+      } else {
+        badge.className = 'role-badge';
+        badge.style.background = '#7f1d1d';
+        badge.style.borderColor = '#dc2626';
+        badge.style.color = '#fca5a5';
+        badge.textContent = `${statusNum} ${rfcCode}`;
+        statusElem.style.color = '#f87171';
+        rfcCodeElem.style.color = '#f87171';
+      }
+    }
+
+    // ========================================================================
+    // PRESETS DE DEMONSTRAÇÃO RÁPIDA (1 CLIQUE)
+    // ========================================================================
+    function quickDemoClient(scenario) {
+      if (scenario === 'search_name') {
+        document.getElementById('clientSearchInput').value = 'Ana';
+        applyClientFilters();
+      } else if (scenario === 'search_cpf') {
+        document.getElementById('clientSearchInput').value = '52998224725';
+        applyClientFilters();
+      } else if (scenario === 'vip_discount') {
+        selectClientById('8NV1c7Q4TCYGcsuPch8I');
+      } else if (scenario === 'view_history') {
+        selectClientById('8NV1c7Q4TCYGcsuPch8I').then(() => {
+          document.querySelector('.card').scrollIntoView({ behavior: 'smooth' });
+        });
+      } else if (scenario === 'create_modal') {
+        openCreateClientModal();
+        document.getElementById('createNameInput').value = 'Juliana Ferreira Lima';
+        document.getElementById('createEmailInput').value = 'juliana.lima@example.com';
+        document.getElementById('createPhoneInput').value = '16988885544';
+        document.getElementById('createCpfInput').value = '52998224725'; // Teste ou altere
+        document.getElementById('createBirthDateInput').value = '10/10/1998';
+      } else if (scenario === 'demo_etag_304') {
+        loadClients(true);
+      } else if (scenario === 'error_resource_in_use') {
+        selectClientById('8NV1c7Q4TCYGcsuPch8I').then(() => {
+          handleDeleteClient();
+        });
+      } else if (scenario === 'error_cpf_invalid') {
+        Api.createClient({
+          name: "Teste CPF Inválido",
+          email: "invalido@email.com",
+          phone: "16999998888",
+          cpf: "11111111111", // Dígitos iguais ou incorretos
+          birthDate: "01/01/2000"
+        }).then(res => {
+          renderClientRfcError(res.error, res.status, 'POST /api/v1/clients (CPF Inválido)');
+        });
+      } else if (scenario === 'error_duplicate') {
+        Api.createClient({
+          name: "Cliente Duplicado",
+          email: "ana.souza@example.com", // E-mail já existente
+          phone: "16999998888",
+          cpf: "52998224725", // CPF já existente
+          birthDate: "01/01/2000"
+        }).then(res => {
+          renderClientRfcError(res.error, res.status, 'POST /api/v1/clients (Conflito)');
+        });
+      } else if (scenario === 'demo_if_match_412') {
+        selectClientById('8NV1c7Q4TCYGcsuPch8I').then(() => {
+          openUpdateClientModal();
+          corruptClientIfMatch();
+          setTimeout(() => {
+            document.querySelector('#updateClientModal form button[type="submit"]').click();
+          }, 300);
+        });
+      }
+    }
+
+    // Inicialização da Tela
+    loadClients(false);
+  </script>
+</body>
+</html>

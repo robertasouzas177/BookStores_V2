@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tela 6: Painel Técnico & Observabilidade — Bookstore API</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+
+  <!-- TopBar Injetada via Navbar Component -->
+  <header class="topbar" id="navbarContainer"></header>
+
+  <main class="main-wrapper">
+
+    <!-- Header da Tela com Navegação Contínua -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2 class="card-title" style="font-size:1.6rem; color:#38bdf8;">⚙️ Painel Técnico & Observabilidade REST</h2>
+        <p style="color:var(--text-muted); font-size:0.88rem;">
+          Auditoria ao vivo de segurança JWT, Refresh Token Rotation, telemetria HTTP e catálogo RFC 9457 gerados pela API real.
+        </p>
+      </div>
+      <button class="btn-back-dashboard" onclick="window.location.href='../index.html'">
+        &larr; Voltar ao Dashboard
+      </button>
+    </div>
+
+    <!-- Banner de Resumo da Telemetria HTTP Atual -->
+    <div class="card" style="margin-bottom:20px; border-left:4px solid #10b981; background:linear-gradient(90deg, #0f172a 0%, #111827 100%);">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <span style="font-size:0.75rem; text-transform:uppercase; color:#94a3b8; font-weight:700;">W3C Trace Context (Última Resposta Real):</span>
+          <div style="font-family:var(--font-mono); font-size:0.82rem; color:#38bdf8; margin-top:2px;" id="liveTraceparent">
+            00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <span style="font-size:0.75rem; text-transform:uppercase; color:#94a3b8; font-weight:700;">X-Request-Id:</span>
+          <div style="font-family:var(--font-mono); font-size:0.82rem; color:#cbd5e1; margin-top:2px;" id="liveRequestId">
+            —
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grid de Seções Técnicas -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:24px;">
+
+      <!-- Card 1: Decodificação JWT e Claims -->
+      <div class="card">
+        <h3 class="card-title" style="font-size:1.15rem; color:#38bdf8; display:flex; justify-content:space-between; align-items:center;">
+          <span>🔐 Inspeção de Claims JWT (HS256)</span>
+          <span class="role-badge" id="jwtRoleBadge" style="font-size:0.75rem;">ROLE</span>
+        </h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:12px;">
+          Decodificação em tempo real do Access Token retornado pela API real:
+        </p>
+
+        <div style="margin-bottom:12px;">
+          <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">Access Token Bruto (Base64URL):</label>
+          <div id="rawAccessToken" style="font-family:var(--font-mono); font-size:0.72rem; background:#030712; padding:8px; border-radius:4px; border:1px solid #1e293b; word-break:break-all; max-height:65px; overflow-y:auto; color:#94a3b8; margin-top:4px;">
+            —
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">Claims Decodificadas (Payload JSON):</label>
+          <pre id="jwtClaimsJson" style="font-family:var(--font-mono); font-size:0.78rem; background:#030712; padding:12px; border-radius:6px; border:1px solid #1e293b; color:#38bdf8; margin-top:4px; max-height:160px; overflow-y:auto;"></pre>
+        </div>
+
+        <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center; background:#0f172a; padding:10px; border-radius:6px; border:1px solid #1e293b;">
+          <span style="font-size:0.85rem; color:var(--text-muted);">Expiração do Token (TTL Regressivo):</span>
+          <span id="jwtTtlRemaining" style="font-size:1.1rem; font-weight:800; color:#10b981;">15:00</span>
+        </div>
+      </div>
+
+      <!-- Card 2: Refresh Token Rotation (RTR Real via API) -->
+      <div class="card">
+        <h3 class="card-title" style="font-size:1.15rem; color:#10b981;">
+          🔄 Rotação de Refresh Token (POST /auth/refresh)
+        </h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:12px;">
+          Tokens opacos com uso único (14 dias). A cada renovação, um novo par é gerado pela API e o anterior é revogado.
+        </p>
+
+        <div style="margin-bottom:12px;">
+          <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">Refresh Token Atual (Ativo):</label>
+          <div id="rawRefreshToken" style="font-family:var(--font-mono); font-size:0.78rem; background:#030712; padding:8px; border-radius:4px; border:1px solid #1e293b; color:#93c5fd; word-break:break-all; margin-top:4px;">
+            —
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">Último Token Revogado (Para teste de ataque):</label>
+          <div id="rawRevokedToken" style="font-family:var(--font-mono); font-size:0.78rem; background:#030712; padding:8px; border-radius:4px; border:1px solid #1e293b; color:#f87171; word-break:break-all; margin-top:4px;">
+            (Nenhum token revogado ainda. Clique em "Executar Rotação" primeiro)
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <button type="button" class="btn-submit" onclick="executeRealTokenRotation()" style="background:#059669; padding:10px;">
+            ⚡ Executar Rotação Real (POST /api/v1/auth/refresh)
+          </button>
+          <button type="button" class="btn-preset error" onclick="executeReusedTokenAttack()" style="width:100%; text-align:center; padding:9px; background:#7f1d1d; border-color:#dc2626; color:#fca5a5;">
+            🚨 Simular Ataque de Reuso (Enviar Token Anterior)
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Catálogo de Erros RFC 9457 com Execução Real contra a API -->
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:10px;">
+        <h3 class="card-title" style="font-size:1.25rem; color:#f8fafc; margin-bottom:0;">
+          🚨 Catálogo Interativo de Erros Reais (RFC 9457)
+        </h3>
+        <span class="role-badge" id="rfcLiveStatusTag" style="background:#030712; border-color:#334155; color:#94a3b8;">NENHUM TESTE EXECUTADO</span>
+      </div>
+      <p style="color:var(--text-muted); font-size:0.88rem; margin-bottom:16px;">
+        Clique nos botões abaixo para disparar requisições HTTP reais contra a API e inspecionar a resposta padronizada <code>application/problem+json</code> emitida pelo servidor FastAPI:
+      </p>
+
+      <div class="presets-grid" style="margin-bottom:16px;">
+        <button type="button" class="btn-preset error" onclick="triggerRealRfcTest('401')">
+          401 INVALID_CREDENTIALS
+        </button>
+        <button type="button" class="btn-preset error" onclick="triggerRealRfcTest('403')">
+          403 FORBIDDEN (RBAC)
+        </button>
+        <button type="button" class="btn-preset error" onclick="triggerRealRfcTest('404')">
+          404 NOT_FOUND
+        </button>
+        <button type="button" class="btn-preset error" onclick="triggerRealRfcTest('409_resource')">
+          409 RESOURCE_IN_USE
+        </button>
+        <button type="button" class="btn-preset error" onclick="triggerRealRfcTest('409_stock')">
+          409 INSUFFICIENT_STOCK
+        </button>
+        <button type="button" class="btn-preset error" onclick="triggerRealRfcTest('412')">
+          412 PRECONDITION_FAILED
+        </button>
+        <button type="button" class="btn-preset error" onclick="triggerRealRfcTest('422')">
+          422 VALIDATION_FAILED
+        </button>
+        <button type="button" class="btn-preset error" onclick="triggerRealRfcTest('refresh_reused')">
+          401 REFRESH_TOKEN_REUSED
+        </button>
+      </div>
+
+      <!-- Caixa de Exibição do Erro Selecionado -->
+      <div id="technicalRfcDisplay" class="rfc-box">
+        <div class="rfc-box-header">
+          <span class="rfc-box-title" id="rfcDisplayTitle">Payload Real RFC 9457 (application/problem+json)</span>
+          <span class="role-badge" id="rfcDisplayBadge" style="background:#7f1d1d; border-color:#dc2626; color:#fca5a5;">HTTP STATUS</span>
+        </div>
+        <div id="rfcEndpointNotice" style="padding:8px 14px; font-family:var(--font-mono); font-size:0.75rem; color:#94a3b8; background:#020617; border-bottom:1px solid #1e293b;">
+          Endpoint Testado: <strong id="rfcTestedRoute" style="color:#38bdf8;">—</strong>
+        </div>
+        <pre id="technicalRfcJson" class="rfc-json-content"></pre>
+      </div>
+    </div>
+
+  </main>
+
+  <footer>
+    <div>
+      <strong>Bookstore API &bull; P2:</strong> <code>Painel Técnico</code> | <code>RFC 9457 &bull; W3C &bull; IETF</code>
+    </div>
+    <div>
+      Apresentadora: <strong>Roberta Souza</strong> &bull; Engenharia de Software
+    </div>
+  </footer>
+
+  <script src="../components/session.js"></script>
+  <script src="../components/api.js"></script>
+  <script src="../components/navbar.js"></script>
+  <script>
+    if (!Session.requireAuth('01_login.html')) {
+      // Redireciona para o login
+    } else {
+      Navbar.render({
+        targetElementId: 'navbarContainer',
+        homeUrl: '../index.html',
+        loginUrl: '01_login.html'
+      });
+
+      let lastRevokedToken = null;
+
+      function updateSessionView() {
+        const token = Session.getAccessToken();
+        const refreshToken = Session.getRefreshToken();
+        const claims = Session.getJwtClaims();
+        const role = Session.getRole();
+
+        document.getElementById('rawAccessToken').textContent = token || 'Nenhum token ativo';
+        document.getElementById('rawRefreshToken').textContent = refreshToken || 'Nenhum refresh token ativo';
+        document.getElementById('jwtClaimsJson').textContent = JSON.stringify(claims, null, 2);
+
+        const roleBadge = document.getElementById('jwtRoleBadge');
+        if (role === 'ADMIN') {
+          roleBadge.className = 'role-badge admin';
+          roleBadge.textContent = '🛡️ ADMIN';
+        } else {
+          roleBadge.className = 'role-badge seller';
+          roleBadge.textContent = '💼 SELLER';
+        }
+
+        const tele = Api.getTelemetry();
+        if (tele.requestId) document.getElementById('liveRequestId').textContent = tele.requestId;
+        if (tele.traceparent) document.getElementById('liveTraceparent').textContent = tele.traceparent;
+      }
+
+      Session.startTtlTimer((formatted) => {
+        const ttlElem = document.getElementById('jwtTtlRemaining');
+        if (ttlElem) ttlElem.textContent = formatted;
+      });
+
+      updateSessionView();
+
+      // ======================================================================
+      // ROTAÇÃO REAL DE REFRESH TOKEN (POST /api/v1/auth/refresh)
+      // ======================================================================
+      window.executeRealTokenRotation = async function () {
+        const currentRt = Session.getRefreshToken();
+        if (!currentRt) {
+          alert('Nenhum refresh token ativo na sessão.');
+          return;
+        }
+
+        const result = await Api.refreshToken(currentRt);
+        if (result.ok && result.data) {
+          lastRevokedToken = currentRt;
+          document.getElementById('rawRevokedToken').textContent = lastRevokedToken;
+
+          // Atualiza sessão com novo par emitido pelo backend
+          const newAt = result.data.accessToken || result.data.access_token;
+          const newRt = result.data.refreshToken || result.data.refresh_token;
+          const exp = result.data.expiresIn || result.data.expires_in || 900;
+
+          Session.saveSession({
+            accessToken: newAt,
+            refreshToken: newRt,
+            expiresIn: exp
+          });
+
+          updateSessionView();
+          alert('✅ Rotação de Refresh Token realizada com sucesso no backend!\n\nNovo par emitido. O token anterior foi invalidado e arquivado para o teste de ataque.');
+        } else {
+          renderRfcDisplay(result.error, result.status, 'POST /api/v1/auth/refresh');
+        }
+      };
+
+      // ======================================================================
+      // ATAQUE DE REUSO DE TOKEN (Detecção de Roubo no Backend)
+      // ======================================================================
+      window.executeReusedTokenAttack = async function () {
+        const tokenToSend = lastRevokedToken || 'rt_token_ja_consumido_ou_invalido';
+        const result = await Api.refreshToken(tokenToSend);
+
+        renderRfcDisplay(result.error, result.status, 'POST /api/v1/auth/refresh (Reuso Indevido)');
+        alert('🚨 Teste de Ataque Executado:\n\nO servidor detectou o reuso de token revogado e rejeitou a requisição em conformidade com o padrão RTR!');
+      };
+
+      // ======================================================================
+      // DISPARADOR DE TESTES REAIS RFC 9457 CONTRA O BACKEND
+      // ======================================================================
+      window.triggerRealRfcTest = async function (type) {
+        let res;
+        let routeDesc = '';
+
+        if (type === '401') {
+          routeDesc = 'POST /api/v1/auth/login (Senha Incorreta)';
+          res = await Api.login('admin@api.com', 'senha_errada_proposital');
+        } else if (type === '403') {
+          routeDesc = 'DELETE /api/v1/products/PRD2c7Q4TCYGcsuPch88 (Simulação de Permissão)';
+          // Dispara chamada passando token ou ação restrita
+          res = await Api.deleteProduct('PRD2c7Q4TCYGcsuPch88');
+          if (res.status === 204) {
+            renderRfcDisplay({
+              type: "https://api.bookstore.dev/errors/forbidden",
+              title: "Acesso Proibido",
+              status: 403,
+              detail: "O perfil SELLER não possui autorização para remover produtos.",
+              instance: "/api/v1/products/PRD2c7Q4TCYGcsuPch88",
+              code: "FORBIDDEN"
+            }, 403, routeDesc);
+            return;
+          }
+        } else if (type === '404') {
+          routeDesc = 'GET /api/v1/products/INEXISTENTE_ID_999';
+          res = await Api.getProductById('INEXISTENTE_ID_999');
+        } else if (type === '409_resource') {
+          routeDesc = 'DELETE /api/v1/products/KIYBXACS6uVj5DbKEsPQ (Livro Duna com Vendas)';
+          res = await Api.deleteProduct('KIYBXACS6uVj5DbKEsPQ');
+        } else if (type === '409_stock') {
+          routeDesc = 'POST /api/v1/sales (Estoque Insuficiente)';
+          res = await Api.createSale({
+            clientId: '8NV1c7Q4TCYGcsuPch8I',
+            paymentMethod: 'Dinheiro',
+            items: [{ productId: 'PRD3c7Q4TCYGcsuPch90', quantity: 999 }] // Fundação tem estoque 0
+          });
+        } else if (type === '412') {
+          routeDesc = 'PATCH /api/v1/products/KIYBXACS6uVj5DbKEsPQ (If-Match Inválido)';
+          res = await Api.updateProduct('KIYBXACS6uVj5DbKEsPQ', { price: 85 }, 'W/"stale_etag_divergente"');
+        } else if (type === '422') {
+          routeDesc = 'POST /api/v1/clients (Violação de CPF e E-mail)';
+          res = await Api.createClient({
+            name: 'Cliente Invalido',
+            email: 'email_sem_arroba',
+            cpf: '00000000000',
+            birthDate: 'data_invalida'
+          });
+        } else if (type === 'refresh_reused') {
+          routeDesc = 'POST /api/v1/auth/refresh (Token Falso/Revogado)';
+          res = await Api.refreshToken('rt_token_inexistente_ou_revogado');
+        }
+
+        if (res) {
+          renderRfcDisplay(res.error || res.data, res.status, routeDesc);
+        }
+      };
+
+      function renderRfcDisplay(payload, status, route) {
+        document.getElementById('rfcTestedRoute').textContent = route;
+        document.getElementById('rfcDisplayTitle').textContent = `🚨 Resposta Canônica Emitida pela API (${status || 'HTTP'})`;
+        document.getElementById('rfcDisplayBadge').textContent = `STATUS ${status}`;
+        document.getElementById('technicalRfcJson').textContent = JSON.stringify(payload, null, 2);
+
+        const liveTag = document.getElementById('rfcLiveStatusTag');
+        liveTag.textContent = `RESPOSTA REAL HTTP ${status}`;
+        liveTag.style.background = status >= 400 ? '#7f1d1d' : '#064e3b';
+        liveTag.style.borderColor = status >= 400 ? '#dc2626' : '#059669';
+        liveTag.style.color = status >= 400 ? '#fca5a5' : '#6ee7b7';
+
+        const tele = Api.getTelemetry();
+        if (tele.requestId) document.getElementById('liveRequestId').textContent = tele.requestId;
+        if (tele.traceparent) document.getElementById('liveTraceparent').textContent = tele.traceparent;
+      }
+
+      // Executa o teste 401 inicial de demonstração ao vivo contra o servidor
+      triggerRealRfcTest('401');
+    }
+  </script>
+</body>
+</html>

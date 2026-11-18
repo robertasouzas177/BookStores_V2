@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tela 1: Login — Bookstore API</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+
+  <!-- TopBar Injetada via Navbar Component -->
+  <header class="topbar" id="navbarContainer"></header>
+
+  <main class="main-wrapper">
+    <div class="login-container">
+
+      <!-- Coluna Esquerda: Formulário de Autenticação -->
+      <div class="card">
+        <h2 class="card-title">Autenticação de Operador</h2>
+        <p class="card-subtitle">Informe suas credenciais ou use os atalhos de demonstração:</p>
+
+        <!-- Presets de Demonstração em 1 Clique para Projetor -->
+        <div class="presets-box">
+          <div class="presets-label">⚡ Demonstração Rápida (Clique para preencher):</div>
+          <div class="presets-grid">
+            <button type="button" class="btn-preset admin" onclick="fillCredentials('admin')">
+              👨‍💼 Admin (ADMIN)
+            </button>
+            <button type="button" class="btn-preset seller" onclick="fillCredentials('seller')">
+              🧑‍💻 Vendedor (SELLER)
+            </button>
+            <button type="button" class="btn-preset error" onclick="fillCredentials('error')">
+              ⚠️ Inválido (Erro 401)
+            </button>
+          </div>
+        </div>
+
+        <form id="loginForm" onsubmit="handleLoginSubmit(event)" novalidate>
+          <div class="form-group">
+            <label for="emailInput" class="form-label">E-mail do Operador</label>
+            <input
+              type="email"
+              id="emailInput"
+              class="form-control"
+              placeholder="ex: admin@api.com"
+              required
+              autocomplete="username"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="passwordInput" class="form-label">Senha de Acesso</label>
+            <div class="input-with-button">
+              <input
+                type="password"
+                id="passwordInput"
+                class="form-control"
+                placeholder="Digite sua senha"
+                required
+                autocomplete="current-password"
+              />
+              <button
+                type="button"
+                id="togglePassBtn"
+                class="btn-toggle-pass"
+                onclick="togglePassword()"
+                aria-label="Mostrar ou ocultar senha"
+              >
+                👁️ Mostrar
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 22px;">
+            <label for="apiUrlInput" class="form-label" style="font-size:0.8rem; color:var(--text-muted);">
+              Base URL da API:
+            </label>
+            <input
+              type="text"
+              id="apiUrlInput"
+              class="form-control"
+              style="padding:6px 10px; font-size:0.85rem; font-family:var(--font-mono);"
+              value="http://localhost:8000"
+            />
+          </div>
+
+          <button type="submit" id="submitBtn" class="btn-submit">
+            <span id="btnSpinner" class="spinner hidden"></span>
+            <span id="btnText">Entrar no Sistema</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Coluna Direita: Feedback de Login e Erro RFC 9457 -->
+      <div class="card">
+        <h2 class="card-title">Resultado da Autenticação</h2>
+        <p class="card-subtitle">Auditoria de resposta do endpoint <code>POST /api/v1/auth/login</code></p>
+
+        <div id="loginStatusBanner" style="padding:14px; border-radius:6px; background:#0f172a; border:1px solid #334155; margin-bottom:16px;">
+          <span id="loginStatusMsg" style="color:var(--text-muted); font-size:0.95rem;">
+            Aguardando submissão de credenciais...
+          </span>
+        </div>
+
+        <!-- Tokens emitidos no login com sucesso -->
+        <div id="loginTokensBox" class="hidden">
+          <div style="margin-bottom:12px;">
+            <div style="font-size:0.8rem; font-weight:700; color:#38bdf8; text-transform:uppercase; margin-bottom:4px;">
+              Access Token (JWT - 15 min):
+            </div>
+            <div id="loginAccessToken" style="font-family:var(--font-mono); font-size:0.75rem; background:#030712; padding:8px; border-radius:4px; border:1px solid #1f2937; word-break:break-all; max-height:75px; overflow-y:auto; color:#e2e8f0;">—</div>
+          </div>
+
+          <div style="margin-bottom:16px;">
+            <div style="font-size:0.8rem; font-weight:700; color:#38bdf8; text-transform:uppercase; margin-bottom:4px;">
+              Refresh Token (Opaco com Rotação):
+            </div>
+            <div id="loginRefreshToken" style="font-family:var(--font-mono); font-size:0.78rem; background:#030712; padding:8px; border-radius:4px; border:1px solid #1f2937; word-break:break-all; color:#93c5fd;">—</div>
+          </div>
+
+          <button type="button" class="btn-submit" onclick="window.location.href='../index.html'" style="background:#059669;">
+            Acessar o Dashboard da Bookstore API &rarr;
+          </button>
+        </div>
+
+        <!-- Erro RFC 9457 -->
+        <div id="rfcErrorBox" class="rfc-box hidden">
+          <div class="rfc-box-header">
+            <span class="rfc-box-title">🚨 Resposta RFC 9457 (Problem Details)</span>
+            <span class="role-badge" style="background:#7f1d1d; border-color:#dc2626; color:#fca5a5;">401 UNAUTHORIZED</span>
+          </div>
+          <pre id="rfcErrorJson" class="rfc-json-content"></pre>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>
+    <div>
+      <strong>Bookstore API &bull; P2:</strong> <code>RFC 9457</code> | <code>JWT Bearer (HS256)</code> | <code>RBAC: ADMIN / SELLER</code>
+    </div>
+    <div>
+      Apresentadora: <strong>Roberta Souza</strong> &bull; Engenharia de Software
+    </div>
+  </footer>
+
+  <script src="../components/session.js"></script>
+  <script src="../components/api.js"></script>
+  <script src="../components/navbar.js"></script>
+  <script>
+    // Inicializa Navbar no modo Login
+    Navbar.render({
+      targetElementId: 'navbarContainer',
+      homeUrl: '../index.html',
+      loginUrl: '01_login.html'
+    });
+
+    const PRESETS = {
+      admin: { email: 'admin@api.com', password: 'Sup3rS3cr3t!' },
+      seller: { email: 'vendedor@example.com', password: 'Sup3rS3cr3t!' },
+      error: { email: 'inexistente@api.com', password: 'SenhaIncorreta123!' }
+    };
+
+    function fillCredentials(type) {
+      const preset = PRESETS[type];
+      if (!preset) return;
+      document.getElementById('emailInput').value = preset.email;
+      document.getElementById('passwordInput').value = preset.password;
+      document.getElementById('rfcErrorBox').classList.add('hidden');
+    }
+
+    function togglePassword() {
+      const pass = document.getElementById('passwordInput');
+      const btn = document.getElementById('togglePassBtn');
+      if (pass.type === 'password') {
+        pass.type = 'text';
+        btn.textContent = '🙈 Ocultar';
+      } else {
+        pass.type = 'password';
+        btn.textContent = '👁️ Mostrar';
+      }
+    }
+
+    async function handleLoginSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById('emailInput').value.trim();
+      const password = document.getElementById('passwordInput').value;
+      const apiUrl = document.getElementById('apiUrlInput').value.trim();
+
+      const submitBtn = document.getElementById('submitBtn');
+      const spinner = document.getElementById('btnSpinner');
+      const btnText = document.getElementById('btnText');
+      const rfcBox = document.getElementById('rfcErrorBox');
+      const tokensBox = document.getElementById('loginTokensBox');
+
+      rfcBox.classList.add('hidden');
+      tokensBox.classList.add('hidden');
+      submitBtn.disabled = true;
+      spinner.classList.remove('hidden');
+      btnText.textContent = 'Autenticando...';
+
+      Session.saveSession({ apiUrl });
+
+      const result = await Api.login(email, password);
+
+      submitBtn.disabled = false;
+      spinner.classList.add('hidden');
+      btnText.textContent = 'Entrar no Sistema';
+
+      if (result.ok) {
+        // Sucesso real da API
+        const tokenData = result.data || {};
+        const accessToken = tokenData.accessToken || tokenData.access_token;
+        const refreshToken = tokenData.refreshToken || tokenData.refresh_token;
+        const expiresIn = tokenData.expiresIn || tokenData.expires_in || 900;
+
+        const claims = Session.decodeJwt(accessToken) || {};
+        const role = claims.role || (email === 'admin@api.com' ? 'ADMIN' : 'SELLER');
+        const user = {
+          name: role === 'ADMIN' ? 'Administrador do Sistema' : 'Vendedor Operacional',
+          email: claims.email || email,
+          role: role,
+          id: claims.sub || (role === 'ADMIN' ? 'SDMXDsjJtqcqK1nWnrk0YjQDqPY2' : 'VND1c7Q4TCYGcsuPch99'),
+          createdAt: '2026-04-23T16:13:01-03:00'
+        };
+
+        Session.saveSession({
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+          user: user,
+          role: role,
+          expiresIn: expiresIn,
+          requestId: result.requestId
+        });
+
+        document.getElementById('loginStatusBanner').style.background = '#064e3b';
+        document.getElementById('loginStatusBanner').style.borderColor = '#059669';
+        document.getElementById('loginStatusMsg').innerHTML = `
+          <span style="color:#d1fae5; font-weight:700;">✅ 200 OK:</span> Autenticado como <strong>${user.role}</strong>. Tokens emitidos com sucesso pela API!
+        `;
+
+        document.getElementById('loginAccessToken').textContent = accessToken;
+        document.getElementById('loginRefreshToken').textContent = refreshToken;
+        tokensBox.classList.remove('hidden');
+
+        // Atualiza a navbar superior imediatamente
+        Navbar.render({ targetElementId: 'navbarContainer', homeUrl: '../index.html', loginUrl: '01_login.html' });
+      } else {
+        // Erro RFC 9457
+        document.getElementById('loginStatusBanner').style.background = '#450a0a';
+        document.getElementById('loginStatusBanner').style.borderColor = '#dc2626';
+        document.getElementById('loginStatusMsg').innerHTML = `
+          <span style="color:#fca5a5; font-weight:700;">❌ 401 ${result.error.title || 'Unauthorized'}:</span> ${result.error.detail || 'Credenciais inválidas.'}
+        `;
+        document.getElementById('rfcErrorJson').textContent = JSON.stringify(result.error, null, 2);
+        rfcBox.classList.remove('hidden');
+      }
+    }
+  </script>
+</body>
+</html>

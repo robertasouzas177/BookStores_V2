@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tela 5: Histórico de Compras — Bookstore API (P2)</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+
+  <!-- TopBar Injetada via Navbar Component -->
+  <header class="topbar" id="navbarContainer"></header>
+
+  <main class="main-wrapper">
+
+    <!-- Header da Tela com Navegação Contínua -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2 class="card-title" style="font-size:1.6rem; color:#38bdf8;">📋 Módulo 4: Histórico de Compras do Cliente</h2>
+        <p style="color:var(--text-muted); font-size:0.88rem;">
+          Sub-recurso: <code>GET /api/v1/clients/{clientId}/sales</code> &bull; Auditoria Imutável &bull; Snapshot Histórico de Produtos &bull; RFC 9457
+        </p>
+      </div>
+      <button class="btn-back-dashboard" onclick="window.location.href='../index.html'">
+        &larr; Voltar ao Dashboard
+      </button>
+    </div>
+
+    <!-- Presets de Demonstração Rápida para a Banca (P2) -->
+    <div class="presets-box" style="margin-bottom:18px;">
+      <div class="presets-label">⚡ Demonstrações Obrigatórias para a Banca (Clique para executar em 1 clique):</div>
+      <div class="presets-grid">
+        <button type="button" class="btn-preset" onclick="quickDemoHistory('full_history')" style="border-left:4px solid #38bdf8;" title="GET /clients/{id}/sales">
+          📜 1. Histórico Completo
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoHistory('immutable_audit')" style="border-left:4px solid #10b981;" title="Evidência de Imutabilidade">
+          🔒 2. Venda Imutável (Auditoria)
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoHistory('totals_breakdown')" style="border-left:4px solid #eab308;" title="grossTotal, discount, finalTotal">
+          💰 3. Decomposição de Totais (Desc. 10%)
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoHistory('product_snapshot')" style="border-left:4px solid #a855f7;" title="Preços e títulos congelados">
+          📸 4. Snapshot Histórico de Itens
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoHistory('seller_identity')" style="border-left:4px solid #06b6d4;" title="sellerId e sellerName do JWT">
+          👤 5. Vendedor via JWT
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoHistory('cache_304')" style="border-left:4px solid #10b981;" title="If-None-Match e 304">
+          ⚡ 6. Cache ETag (304 Not Modified)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoHistory('error_404')" style="border-left:4px solid #ef4444;" title="GET /clients/INEXISTENTE/sales">
+          ❌ 7. Cliente Inexistente (404 RFC 9457)
+        </button>
+      </div>
+    </div>
+
+    <!-- CLIENT CONTEXT BAR (Barra de Contexto do Cliente Selecionado) -->
+    <div class="card" style="padding:16px; margin-bottom:18px; border-left:4px solid #38bdf8;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:1.8rem;">👤</span>
+          <div>
+            <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:800;">
+              Cliente em Auditoria:
+            </div>
+            <div id="ctxClientName" style="font-size:1.2rem; font-weight:800; color:#f8fafc;">Ana Carolina Silva</div>
+            <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">
+              CPF: <code id="ctxClientCpf" style="color:#93c5fd;">529.982.247-25</code> &bull; E-mail: <span id="ctxClientEmail" style="color:#cbd5e1;">ana.silva@example.com</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+          <div>
+            <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Fidelidade:</div>
+            <div id="ctxClientPoints" style="font-size:1.2rem; font-weight:900; color:#f59e0b;">100 pts</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Total de Compras:</div>
+            <div id="ctxClientSalesCount" style="font-size:1.2rem; font-weight:800; color:#10b981;">2 compras</div>
+          </div>
+          <button type="button" class="btn-page" style="padding:6px 14px; font-size:0.85rem;" onclick="openChangeClientModal()">
+            🔍 Trocar / Buscar Outro Cliente
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Barra de Filtros e Ordenação -->
+    <div class="filter-bar" style="margin-bottom:18px;">
+      <div class="filter-group">
+        <label for="sortSalesSelect" style="font-size:0.85rem; font-weight:700; color:var(--text-muted);">Ordenar:</label>
+        <select id="sortSalesSelect" class="form-control" style="padding:6px 10px; font-size:0.85rem; width:190px;" onchange="applySalesFilters()">
+          <option value="-createdAt" selected>Mais Recentes Primeiro</option>
+          <option value="createdAt">Mais Antigas Primeiro</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="filterDateStart" style="font-size:0.85rem; font-weight:700; color:var(--text-muted);">Período:</label>
+        <input type="date" id="filterDateStart" class="form-control" style="padding:4px 8px; font-size:0.85rem;" onchange="applySalesFilters()" />
+        <span style="color:var(--text-muted); font-size:0.8rem;">até</span>
+        <input type="date" id="filterDateEnd" class="form-control" style="padding:4px 8px; font-size:0.85rem;" onchange="applySalesFilters()" />
+        <button type="button" class="btn-page" onclick="clearDateFilter()" title="Limpar período">✕</button>
+      </div>
+
+      <div style="margin-left:auto; display:flex; gap:8px;">
+        <button type="button" class="btn-page" onclick="loadClientSales(false)">
+          🔄 Atualizar
+        </button>
+        <button type="button" class="btn-submit" style="padding:6px 14px; font-size:0.85rem;" onclick="window.location.href='04_vendas.html'">
+          🛒 Nova Venda (PDV)
+        </button>
+      </div>
+    </div>
+
+    <!-- LAYOUT PRINCIPAL MASTER-DETAIL -->
+    <div class="products-layout" style="align-items:start;">
+
+      <!-- Coluna Esquerda: Tabela de Vendas (Master) -->
+      <div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width:170px;">ID da Venda</th>
+                <th style="width:140px;">Data & Hora</th>
+                <th>Vendedor Responsável</th>
+                <th style="width:95px; text-align:right;">Bruto</th>
+                <th style="width:95px; text-align:right;">Desconto</th>
+                <th style="width:110px; text-align:right;">Total Líquido</th>
+                <th style="width:80px; text-align:center;">Ação</th>
+              </tr>
+            </thead>
+            <tbody id="salesTableBody">
+              <tr>
+                <td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);">
+                  Carregando histórico de compras...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Controles de Paginação -->
+        <div class="pagination-controls" style="flex-wrap:wrap; gap:10px;">
+          <button type="button" id="btnPrevPage" class="btn-page" onclick="changeSalesPage(-1)" disabled>
+            &larr; Anterior
+          </button>
+
+          <div style="font-size:0.85rem; color:var(--text-muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span>Página: <strong id="metaPage" style="color:#f8fafc;">1</strong> / <span id="metaTotalPages">1</span></span>
+            <span>&bull;</span>
+            <span>Limite: <strong id="metaLimit" style="color:#38bdf8;">10</strong></span>
+            <span>&bull;</span>
+            <span>Total: <strong id="metaTotalItems" style="color:#10b981;">0</strong> compras</span>
+            <span>&bull;</span>
+            <span>Tem Próxima (hasNext): <strong id="metaHasNext" style="color:#94a3b8;">Não</strong></span>
+          </div>
+
+          <button type="button" id="btnNextPage" class="btn-page" onclick="changeSalesPage(1)" disabled>
+            Próxima &rarr;
+          </button>
+        </div>
+      </div>
+
+      <!-- Coluna Direita: Painel de Detalhes da Venda Selecionada (Detail) -->
+      <div class="product-detail-box">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+          <h3 style="font-size:1.05rem; font-weight:700; color:#38bdf8;">Comprovante da Venda</h3>
+          <span class="stock-badge high" style="background:#064e3b; border-color:#059669; color:#6ee7b7;">201 Created</span>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <div style="display:inline-block; background:#1e293b; border:1px solid #475569; color:#f8fafc; font-size:0.75rem; font-weight:800; padding:4px 8px; border-radius:4px; letter-spacing:0.5px;">
+            🔒 REGISTRO IMUTÁVEL (AUDITADO)
+          </div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">
+            Venda gravada em caráter permanente. Sem endpoints de alteração ou exclusão.
+          </div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">ID da Venda (Firestore Doc):</div>
+          <div id="detailSaleId" class="detail-value" style="font-family:var(--font-mono); font-size:0.85rem; color:#38bdf8; word-break:break-all;">—</div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">Data e Hora de Fechamento:</div>
+          <div id="detailCreatedAt" class="detail-value" style="font-size:0.9rem; color:#f8fafc;">—</div>
+        </div>
+
+        <!-- Dados do Vendedor (Identity via JWT) -->
+        <div style="background:#0f172a; border:1px solid #334155; border-radius:6px; padding:10px; margin-bottom:12px;">
+          <div style="font-size:0.75rem; font-weight:800; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">
+            👤 Vendedor Responsável (JWT Audit):
+          </div>
+          <div id="detailSellerName" style="font-size:0.92rem; font-weight:700; color:#f8fafc;">—</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+            sellerId: <code id="detailSellerId" style="color:#38bdf8;">—</code>
+          </div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">Forma de Pagamento:</div>
+          <div id="detailPaymentMethod" class="detail-value" style="color:#cbd5e1;">Dinheiro</div>
+        </div>
+
+        <!-- Decomposição Financeira da Venda -->
+        <div style="background:#030712; border:1px solid #1e293b; border-radius:6px; padding:12px; margin-top:10px;">
+          <div style="font-size:0.75rem; font-weight:800; color:#94a3b8; text-transform:uppercase; margin-bottom:8px;">
+            💳 Decomposição Financeira:
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:0.85rem;">
+            <span style="color:var(--text-muted);">Total Bruto (grossTotal):</span>
+            <strong id="detailGrossTotal" style="color:#f8fafc;">R$ 0,00</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:0.85rem; color:#f59e0b;">
+            <span>Desconto Fidelidade (discount):</span>
+            <strong id="detailDiscount">- R$ 0,00</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:1.15rem; font-weight:900; border-top:1px solid #334155; padding-top:6px; margin-top:6px;">
+            <span style="color:#f8fafc;">VALOR FINAL (finalTotal):</span>
+            <strong id="detailFinalTotal" style="color:#10b981;">R$ 0,00</strong>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================================================
+         TABELA DE ITENS COM SNAPSHOT HISTÓRICO CONGELADO (SaleItems)
+         ======================================================================== -->
+    <div class="card" style="margin-top:24px; padding:18px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+        <h3 style="font-size:1.15rem; color:#f1f5f9; display:flex; align-items:center; gap:8px;">
+          <span>📸 Itens da Venda com Snapshot de Preço Histórico</span>
+          <code id="itemsSaleIdTag" style="font-size:0.8rem; color:#38bdf8;">—</code>
+        </h3>
+        <span class="stock-badge high" style="background:#0c4a6e; border-color:#0284c7; color:#7dd3fc; font-size:0.75rem;">
+          Snapshot de Domínio Ativo
+        </span>
+      </div>
+
+      <div class="alert alert-info" style="margin-bottom:14px; background:#0f172a; border-color:#334155;">
+        <span class="alert-icon">ℹ️</span>
+        <div style="font-size:0.82rem;">
+          <strong>Garantia Contábil de Snapshot:</strong> Os títulos e os preços unitários abaixo foram congelados no exato momento da venda. Reajustes cadastrais subsequentes no catálogo de produtos <strong>não alteram</strong> os valores registrados neste histórico.
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:160px;">ID do Livro (productId)</th>
+              <th>Título Gravado (Snapshot Histórico)</th>
+              <th style="width:100px; text-align:center;">Quantidade</th>
+              <th style="width:120px; text-align:right;">Preço Unit. Gravado</th>
+              <th style="width:120px; text-align:right;">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody id="saleItemsTableBody">
+            <tr>
+              <td colspan="5" style="text-align:center; padding:18px; color:var(--text-muted);">
+                Selecione uma venda na tabela acima para inspecionar seus itens.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========================================================================
+         PAINEL TÉCNICO OBRIGATÓRIO (OBSERVABILIDADE REST E GOVERNANÇA HTTP)
+         ======================================================================== -->
+    <div class="tech-panel" style="margin-top:24px;">
+      <div class="tech-panel-header">
+        <h3 style="font-size:1.05rem; color:#f1f5f9;">⚙️ Painel Técnico & Governança REST (Histórico de Vendas)</h3>
+        <span id="histTechStatusBadge" class="role-badge" style="background:#064e3b; border-color:#059669; color:#6ee7b7;">200 OK</span>
+      </div>
+
+      <div class="tech-grid">
+        <!-- 1. Status HTTP -->
+        <div class="tech-box">
+          <div class="tech-box-title">Status HTTP</div>
+          <div id="histTechHttpStatus" style="font-size:1.25rem; font-weight:800; color:#10b981;">HTTP 200 OK</div>
+          <div id="histTechStatusDetail" style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Histórico carregado com sucesso.</div>
+        </div>
+
+        <!-- 2. Cache Status (MISS / HIT 304) -->
+        <div class="tech-box">
+          <div class="tech-box-title">Cache Status</div>
+          <div id="histTechCacheStatus" style="font-size:1.15rem; font-weight:800; color:#38bdf8;">MISS (Payload Recebido)</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Validação condicional via If-None-Match.</div>
+        </div>
+
+        <!-- 3. ETag Atual -->
+        <div class="tech-box">
+          <div class="tech-box-title">ETag Atual (Sub-recurso)</div>
+          <div id="histTechETag" class="tech-box-code">—</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Hash de versão do histórico de compras.</div>
+        </div>
+
+        <!-- 4. X-Request-Id -->
+        <div class="tech-box">
+          <div class="tech-box-title">X-Request-Id (Trace Context)</div>
+          <div id="histTechRequestId" class="tech-box-code" style="color:#93c5fd;">8NV1c7Q4TCYGcsuPch8I</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Identificador de correlação W3C.</div>
+        </div>
+
+        <!-- 5. Código RFC 9457 -->
+        <div class="tech-box">
+          <div class="tech-box-title">Código RFC 9457</div>
+          <div id="histTechRfcCode" style="font-family:var(--font-mono); font-size:1.15rem; font-weight:700; color:#38bdf8;">NENHUM ERRO</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Identificador de erro contratual para máquinas.</div>
+        </div>
+
+        <!-- 6. Imutabilidade -->
+        <div class="tech-box">
+          <div class="tech-box-title">Diretriz de Imutabilidade</div>
+          <div style="font-size:1rem; font-weight:800; color:#10b981;">LEITURA EXCLUSIVA</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Sem rotas de mutação após a criação.</div>
+        </div>
+      </div>
+
+      <!-- Box de Exibição de Resposta RFC 9457 em caso de erro -->
+      <div id="histRfcErrorBox" class="rfc-box hidden" style="margin-top:16px;">
+        <div class="rfc-box-header">
+          <span class="rfc-box-title">🚨 Resposta RFC 9457 (Problem Details: application/problem+json)</span>
+          <span id="histRfcStatusTag" class="role-badge" style="background:#7f1d1d; border-color:#dc2626; color:#fca5a5;">404 NOT_FOUND</span>
+        </div>
+        <pre id="histRfcErrorJson" class="rfc-json-content"></pre>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================
+       MODAL: SELEÇÃO RÁPIDA DE CLIENTE (GET /api/v1/clients)
+       ======================================================================== -->
+  <div id="changeClientModal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width:540px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+        <h3 style="font-size:1.15rem; color:#f8fafc;">Selecionar Cliente para Auditoria</h3>
+        <button type="button" class="btn-toggle-pass" onclick="closeChangeClientModal()">✕</button>
+      </div>
+
+      <div class="form-group" style="margin-bottom:12px;">
+        <input
+          type="text"
+          id="clientSearchModalInput"
+          class="form-control"
+          placeholder="Buscar por nome ou CPF..."
+          oninput="searchClientsForModal()"
+        />
+      </div>
+
+      <div id="clientSearchResultsContainer" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+        <!-- Lista de clientes injetada via JS -->
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div>
+      <strong>Bookstore API &bull; P2:</strong> <code>GET /clients/{id}/sales</code> | <code>Imutabilidade</code> | <code>Snapshot</code> | <code>RFC 9457</code>
+    </div>
+    <div>
+      Apresentadora: <strong>Roberta Souza</strong> &bull; Engenharia de Software
+    </div>
+  </footer>
+
+  <script src="../components/session.js"></script>
+  <script src="../components/api.js"></script>
+  <script src="../components/navbar.js"></script>
+  <script>
+    // 1. Validação de Sessão obrigatória
+    Session.requireAuth('01_login.html');
+
+    Navbar.render({
+      targetElementId: 'navbarContainer',
+      homeUrl: '../index.html',
+      loginUrl: '01_login.html'
+    });
+
+    const historyState = {
+      client: null,
+      page: 1,
+      limit: 10,
+      sort: '-createdAt',
+      dateStart: '',
+      dateEnd: '',
+      selectedSale: null,
+      salesList: [],
+      collectionETag: 'W/"sales_init"',
+      lastSaleIdFromPdv: null
+    };
+
+    function formatCpf(cpf) {
+      if (!cpf) return '—';
+      const clean = String(cpf).replace(/\D/g, '');
+      if (clean.length === 11) {
+        return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+      }
+      return cpf;
+    }
+
+    // 2. Inicialização do Contexto do Cliente
+    async function initClientContext() {
+      // Verifica se há venda recém-criada na Tela 4
+      const lastSale = Session.getLastSale();
+      if (lastSale && lastSale.id) {
+        historyState.lastSaleIdFromPdv = lastSale.id;
+      }
+
+      let client = Session.getSelectedClient();
+      if (!client) {
+        const res = await Api.getClients({ page: 1, limit: 1 });
+        const list = (res.data && Array.isArray(res.data.data)) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+        if (list.length > 0) {
+          client = list[0];
+          Session.setSelectedClient(client);
+        }
+      }
+
+      setClientContext(client);
+    }
+
+    function setClientContext(client) {
+      historyState.client = client;
+      if (!client) return;
+
+      document.getElementById('ctxClientName').textContent = client.name;
+      document.getElementById('ctxClientCpf').textContent = formatCpf(client.cpf);
+      document.getElementById('ctxClientEmail').textContent = client.email;
+      document.getElementById('ctxClientPoints').textContent = `${client.loyaltyPoints || 0} pts`;
+
+      loadClientSales(false);
+    }
+
+    // 3. Carregamento do Histórico de Vendas
+    async function loadClientSales(useIfNoneMatch = false) {
+      const client = historyState.client;
+      if (!client) return;
+
+      document.getElementById('histRfcErrorBox').classList.add('hidden');
+
+      const ifNoneMatchValue = useIfNoneMatch ? historyState.collectionETag : null;
+
+      const result = await Api.getClientSales(client.id, {
+        page: historyState.page,
+        limit: historyState.limit,
+        sort: historyState.sort,
+        ifNoneMatch: ifNoneMatchValue
+      });
+
+      if (result.status === 304) {
+        updateHistoryTechConsole(
+          304,
+          'Not Modified',
+          'HIT (304 Not Modified)',
+          result.etag || historyState.collectionETag,
+          result.requestId,
+          'NENHUM ERRO',
+          'Histórico não modificado no servidor (Cache 304 validado via If-None-Match).'
+        );
+        return;
+      }
+
+      if (!result.ok) {
+        renderHistoryRfcError(result.error, result.status);
+        return;
+      }
+
+      historyState.collectionETag = result.etag || historyState.collectionETag;
+      const salesArray = (result.data && Array.isArray(result.data.data)) ? result.data.data : (Array.isArray(result.data) ? result.data : []);
+      const meta = (result.data && result.data.meta) ? result.data.meta : (result.meta || { page: 1, limit: 10, totalItems: salesArray.length, totalPages: 1, hasNext: false });
+      historyState.salesList = salesArray;
+
+      // Filtro local de data se preenchido
+      let filtered = [...historyState.salesList];
+      if (historyState.dateStart) {
+        filtered = filtered.filter(s => new Date(s.createdAt) >= new Date(historyState.dateStart));
+      }
+      if (historyState.dateEnd) {
+        const end = new Date(historyState.dateEnd);
+        end.setHours(23, 59, 59, 999);
+        filtered = filtered.filter(s => new Date(s.createdAt) <= end);
+      }
+
+      const totalItems = meta.totalItems !== undefined ? meta.totalItems : salesArray.length;
+      document.getElementById('ctxClientSalesCount').textContent = `${totalItems} compras`;
+
+      updateHistoryTechConsole(
+        200,
+        'OK',
+        'MISS (Payload Recebido)',
+        historyState.collectionETag,
+        result.requestId,
+        'NENHUM ERRO',
+        `Histórico de ${totalItems} compras carregado com sucesso via GET /clients/${client.id}/sales.`
+      );
+
+      renderSalesTable(filtered, meta);
+    }
+
+    // 4. Renderização da Tabela de Vendas (Master)
+    function renderSalesTable(sales, meta) {
+      const tbody = document.getElementById('salesTableBody');
+      tbody.innerHTML = '';
+
+      const totalItems = meta.totalItems !== undefined ? meta.totalItems : sales.length;
+      const totalPages = meta.totalPages || Math.ceil(totalItems / meta.limit) || 1;
+      const hasNext = meta.page < totalPages;
+
+      document.getElementById('metaPage').textContent = meta.page;
+      document.getElementById('metaTotalPages').textContent = totalPages;
+      document.getElementById('metaLimit').textContent = meta.limit;
+      document.getElementById('metaTotalItems').textContent = totalItems;
+      document.getElementById('metaHasNext').textContent = hasNext ? 'Sim' : 'Não';
+      document.getElementById('metaHasNext').style.color = hasNext ? '#10b981' : '#94a3b8';
+
+      document.getElementById('btnPrevPage').disabled = meta.page <= 1;
+      document.getElementById('btnNextPage').disabled = !hasNext;
+
+      if (!sales || sales.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" style="text-align:center; padding:28px; color:var(--text-muted);">
+              Nenhuma compra localizada para este cliente no período selecionado.
+            </td>
+          </tr>
+        `;
+        clearSaleDetail();
+        return;
+      }
+
+      let autoSelectSale = null;
+
+      sales.forEach(s => {
+        const tr = document.createElement('tr');
+        const isSelected = historyState.selectedSale && historyState.selectedSale.id === s.id;
+        const isRecent = historyState.lastSaleIdFromPdv && historyState.lastSaleIdFromPdv === s.id;
+
+        if (isSelected) tr.className = 'selected';
+        if (isRecent) {
+          tr.style.borderLeft = '4px solid #10b981';
+          tr.style.background = '#064e3b22';
+        }
+
+        tr.onclick = () => selectSale(s);
+
+        let dateFormatted = s.createdAt;
+        try {
+          const d = new Date(s.createdAt);
+          if (!isNaN(d.getTime())) {
+            dateFormatted = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR');
+          }
+        } catch (e) {}
+
+        const recentBadge = isRecent
+          ? `<span class="stock-badge high" style="font-size:0.68rem; margin-left:4px; padding:1px 5px; background:#065f46; color:#6ee7b7;">✨ Recém-Criada</span>`
+          : '';
+
+        tr.innerHTML = `
+          <td>
+            <code style="color:#38bdf8; font-size:0.82rem; font-weight:700;">${s.id}</code>
+            ${recentBadge}
+          </td>
+          <td style="font-size:0.8rem; color:#cbd5e1;">${dateFormatted}</td>
+          <td style="font-size:0.85rem; color:#f8fafc;">
+            <div>${s.sellerName}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);"><code>${s.sellerId}</code></div>
+          </td>
+          <td style="text-align:right; font-size:0.85rem;">R$ ${s.grossTotal},00</td>
+          <td style="text-align:right; font-size:0.85rem; color:${s.discount > 0 ? '#f59e0b' : 'var(--text-muted)'}; font-weight:700;">
+            ${s.discount > 0 ? '- R$ ' + s.discount + ',00' : 'R$ 0,00'}
+          </td>
+          <td style="text-align:right; font-weight:800; color:#10b981; font-size:0.95rem;">
+            R$ ${s.finalTotal},00
+          </td>
+          <td style="text-align:center;">
+            <button type="button" class="btn-page" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); selectSaleById('${s.id}')">
+              Ver
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+
+        // Se for a venda recém-criada vinda do PDV, prioriza ela na seleção
+        if (isRecent && !autoSelectSale) {
+          autoSelectSale = s;
+        }
+      });
+
+      // Seleção automática: se houver venda recente do PDV, seleciona-a; senão seleciona a primeira da lista
+      if (autoSelectSale) {
+        selectSale(autoSelectSale);
+      } else if (!historyState.selectedSale && sales.length > 0) {
+        selectSale(sales[0]);
+      }
+    }
+
+    // 5. Seleção e Exibição de Detalhes da Venda (Detail)
+    function selectSale(sale) {
+      if (!sale) return;
+      historyState.selectedSale = sale;
+
+      document.querySelectorAll('#salesTableBody tr').forEach(row => row.classList.remove('selected'));
+
+      document.getElementById('detailSaleId').textContent = sale.id;
+
+      let dateFormatted = sale.createdAt;
+      try {
+        const d = new Date(sale.createdAt);
+        if (!isNaN(d.getTime())) {
+          dateFormatted = d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR');
+        }
+      } catch (e) {}
+      document.getElementById('detailCreatedAt').textContent = dateFormatted;
+
+      document.getElementById('detailSellerName').textContent = sale.sellerName;
+      document.getElementById('detailSellerId').textContent = sale.sellerId;
+      document.getElementById('detailPaymentMethod').textContent = sale.paymentMethod || 'Dinheiro';
+
+      document.getElementById('detailGrossTotal').textContent = `R$ ${sale.grossTotal},00`;
+      document.getElementById('detailDiscount').textContent = sale.discount > 0 ? `- R$ ${sale.discount},00` : `R$ 0,00`;
+      document.getElementById('detailFinalTotal').textContent = `R$ ${sale.finalTotal},00`;
+
+      // Renderiza itens com snapshot histórico
+      renderSaleItemsSnapshot(sale);
+    }
+
+    function selectSaleById(id) {
+      const s = historyState.salesList.find(item => item.id === id);
+      if (s) selectSale(s);
+    }
+
+    function clearSaleDetail() {
+      historyState.selectedSale = null;
+      document.getElementById('detailSaleId').textContent = '—';
+      document.getElementById('detailCreatedAt').textContent = '—';
+      document.getElementById('detailSellerName').textContent = '—';
+      document.getElementById('detailSellerId').textContent = '—';
+      document.getElementById('detailGrossTotal').textContent = 'R$ 0,00';
+      document.getElementById('detailDiscount').textContent = 'R$ 0,00';
+      document.getElementById('detailFinalTotal').textContent = 'R$ 0,00';
+      document.getElementById('itemsSaleIdTag').textContent = '—';
+      document.getElementById('saleItemsTableBody').innerHTML = `
+        <tr>
+          <td colspan="5" style="text-align:center; padding:18px; color:var(--text-muted);">
+            Nenhuma venda selecionada.
+          </td>
+        </tr>
+      `;
+    }
+
+    // 6. Renderização da Tabela de Itens (Snapshot de Produtos)
+    function renderSaleItemsSnapshot(sale) {
+      const tbody = document.getElementById('saleItemsTableBody');
+      document.getElementById('itemsSaleIdTag').textContent = sale.id;
+      tbody.innerHTML = '';
+
+      const items = sale.items || [];
+      if (items.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align:center; padding:18px; color:var(--text-muted);">
+              Nenhum item gravado nesta venda.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      items.forEach(it => {
+        const tr = document.createElement('tr');
+        const unitPrice = it.unitPrice !== undefined ? it.unitPrice : it.unit_price;
+        const subtotal = it.subtotal !== undefined ? it.subtotal : (it.quantity * unitPrice);
+        const prodId = it.productId || it.product_id;
+
+        tr.innerHTML = `
+          <td><code style="color:#93c5fd; font-size:0.8rem;">${prodId}</code></td>
+          <td>
+            <div style="font-weight:700; color:#f8fafc; font-size:0.88rem;">${it.title}</div>
+            <div style="font-size:0.75rem; color:#a7f3d0;">📸 Título histórico congelado na data da venda</div>
+          </td>
+          <td style="text-align:center; font-weight:700;">${it.quantity} un</td>
+          <td style="text-align:right;">R$ ${unitPrice},00</td>
+          <td style="text-align:right; font-weight:800; color:#10b981;">R$ ${subtotal},00</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // 7. Filtros e Paginação
+    function applySalesFilters() {
+      historyState.sort = document.getElementById('sortSalesSelect').value;
+      historyState.dateStart = document.getElementById('filterDateStart').value;
+      historyState.dateEnd = document.getElementById('filterDateEnd').value;
+      historyState.page = 1;
+      loadClientSales(false);
+    }
+
+    function clearDateFilter() {
+      document.getElementById('filterDateStart').value = '';
+      document.getElementById('filterDateEnd').value = '';
+      historyState.dateStart = '';
+      historyState.dateEnd = '';
+      loadClientSales(false);
+    }
+
+    function changeSalesPage(delta) {
+      historyState.page += delta;
+      if (historyState.page < 1) historyState.page = 1;
+      loadClientSales(false);
+    }
+
+    // 8. Console Técnico de Observabilidade REST
+    function updateHistoryTechConsole(statusNum, statusTitle, cacheStatus, etag, reqId, rfcCode, detailMsg) {
+      const badge = document.getElementById('histTechStatusBadge');
+      const statusElem = document.getElementById('histTechHttpStatus');
+      const detailElem = document.getElementById('histTechStatusDetail');
+      const cacheElem = document.getElementById('histTechCacheStatus');
+      const etagElem = document.getElementById('histTechETag');
+      const reqIdElem = document.getElementById('histTechRequestId');
+      const rfcCodeElem = document.getElementById('histTechRfcCode');
+
+      statusElem.textContent = `HTTP ${statusNum} ${statusTitle}`;
+      detailElem.textContent = detailMsg;
+      cacheElem.textContent = cacheStatus;
+      etagElem.textContent = etag;
+      reqIdElem.textContent = reqId;
+      rfcCodeElem.textContent = rfcCode;
+
+      if (cacheStatus.includes('304')) {
+        cacheElem.style.color = '#10b981';
+      } else {
+        cacheElem.style.color = '#38bdf8';
+      }
+
+      if (statusNum >= 200 && statusNum < 300) {
+        badge.className = 'role-badge';
+        badge.style.background = '#064e3b';
+        badge.style.borderColor = '#059669';
+        badge.style.color = '#6ee7b7';
+        badge.textContent = `${statusNum} ${statusTitle}`;
+        statusElem.style.color = '#10b981';
+        rfcCodeElem.style.color = '#38bdf8';
+      } else if (statusNum === 304) {
+        badge.className = 'role-badge';
+        badge.style.background = '#0c4a6e';
+        badge.style.borderColor = '#0284c7';
+        badge.style.color = '#7dd3fc';
+        badge.textContent = '304 NOT MODIFIED';
+        statusElem.style.color = '#38bdf8';
+        rfcCodeElem.style.color = '#38bdf8';
+      } else {
+        badge.className = 'role-badge';
+        badge.style.background = '#7f1d1d';
+        badge.style.borderColor = '#dc2626';
+        badge.style.color = '#fca5a5';
+        badge.textContent = `${statusNum} ${rfcCode}`;
+        statusElem.style.color = '#f87171';
+        rfcCodeElem.style.color = '#f87171';
+      }
+    }
+
+    function renderHistoryRfcError(problemJson, httpStatus) {
+      updateHistoryTechConsole(httpStatus, problemJson.title || 'Error', 'MISS (Erro)', historyState.collectionETag, '8NV1c7Q4TCYGcsuPch8I', problemJson.code || 'ERROR', problemJson.detail || 'Ocorreu um erro.');
+
+      const box = document.getElementById('histRfcErrorBox');
+      const tag = document.getElementById('histRfcStatusTag');
+      const json = document.getElementById('histRfcErrorJson');
+
+      tag.textContent = `${httpStatus} ${problemJson.code || ''}`;
+      json.textContent = JSON.stringify(problemJson, null, 2);
+      box.classList.remove('hidden');
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // 9. Modal de Troca de Cliente
+    function openChangeClientModal() {
+      searchClientsForModal();
+      document.getElementById('changeClientModal').classList.remove('hidden');
+    }
+
+    function closeChangeClientModal() {
+      document.getElementById('changeClientModal').classList.add('hidden');
+    }
+
+    async function searchClientsForModal() {
+      const q = document.getElementById('clientSearchModalInput').value.trim();
+      const container = document.getElementById('clientSearchResultsContainer');
+      container.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:10px;">Buscando clientes...</div>`;
+
+      const res = await Api.getClients({ page: 1, limit: 10, search: q });
+      if (res.ok && res.data) {
+        container.innerHTML = '';
+        if (res.data.length === 0) {
+          container.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:10px;">Nenhum cliente localizado.</div>`;
+          return;
+        }
+
+        res.data.forEach(c => {
+          const div = document.createElement('div');
+          div.style.background = '#0f172a';
+          div.style.border = '1px solid #1e293b';
+          div.style.borderRadius = '6px';
+          div.style.padding = '8px 12px';
+          div.style.display = 'flex';
+          div.style.justifyContent = 'space-between';
+          div.style.alignItems = 'center';
+          div.style.cursor = 'pointer';
+
+          div.innerHTML = `
+            <div>
+              <div style="font-weight:700; color:#f8fafc; font-size:0.88rem;">${c.name}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">
+                CPF: ${formatCpf(c.cpf)} &bull; Saldo: <strong style="color:#f59e0b;">${c.loyaltyPoints} pts</strong>
+              </div>
+            </div>
+            <button type="button" class="btn-page" style="padding:4px 8px; font-size:0.75rem;">Selecionar</button>
+          `;
+          div.onclick = () => {
+            Session.setSelectedClient(c);
+            setClientContext(c);
+            closeChangeClientModal();
+          };
+          container.appendChild(div);
+        });
+      }
+    }
+
+    // 10. Presets de Demonstração Rápida (1 Clique para Projetor)
+    async function quickDemoHistory(scenario) {
+      if (scenario === 'full_history') {
+        const res = await Api.getClientById('8NV1c7Q4TCYGcsuPch8I');
+        if (res.ok && res.data) setClientContext(res.data);
+      } else if (scenario === 'immutable_audit') {
+        if (historyState.salesList.length > 0) {
+          selectSale(historyState.salesList[0]);
+        }
+        document.querySelector('.product-detail-box').scrollIntoView({ behavior: 'smooth' });
+      } else if (scenario === 'totals_breakdown') {
+        if (historyState.salesList.length > 0) {
+          selectSale(historyState.salesList[0]);
+        }
+        document.querySelector('.product-detail-box').scrollIntoView({ behavior: 'smooth' });
+      } else if (scenario === 'product_snapshot') {
+        if (historyState.salesList.length > 0) {
+          selectSale(historyState.salesList[0]);
+        }
+        document.querySelector('#itemsSaleIdTag').scrollIntoView({ behavior: 'smooth' });
+      } else if (scenario === 'seller_identity') {
+        if (historyState.salesList.length > 0) {
+          selectSale(historyState.salesList[0]);
+        }
+        document.getElementById('detailSellerName').style.color = '#38bdf8';
+      } else if (scenario === 'cache_304') {
+        loadClientSales(true);
+      } else if (scenario === 'error_404') {
+        const res = await Api.getClientSales('INEXISTENTE_ID');
+        if (!res.ok) {
+          renderHistoryRfcError(res.error, res.status);
+        }
+      }
+    }
+
+    // Inicialização da Tela
+    initClientContext();
+  </script>
+</body>
+</html>

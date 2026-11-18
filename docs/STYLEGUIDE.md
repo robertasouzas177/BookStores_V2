@@ -83,7 +83,9 @@ docs/
 ├── STYLEGUIDE.md
 ├── SPEC.md
 ├── PLAN.md
-└── TESTS.md
+├── TESTS.md
+├── AI_WORKFLOW.md
+└── ai-evidence/
 
 apidog/
 └── Bookstore API.openapi.yaml
@@ -96,6 +98,20 @@ src/api/
 ├── exceptions.py
 ├── routers/
 └── tests/
+
+demo/
+├── app.py
+├── README.md
+├── index.html
+├── assets/
+├── components/
+└── pages/
+    ├── 01_login.html
+    ├── 02_produtos.html
+    ├── 03_clientes.html
+    ├── 04_vendas.html
+    ├── 05_historico.html
+    └── 06_painel_tecnico.html
 ```
 
 ---

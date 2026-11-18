@@ -334,16 +334,17 @@ async def update_client(
     "/{id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Remover cliente",
-    description="Exclui o cliente. Retorna 409 se houver vendas vinculadas ao cliente.",
+    description="Exclui o cliente. Retorna 409 se houver vendas vinculadas ao cliente ou precondição falhar.",
 )
 async def delete_client(
     id: str,
     request: Request,
     response: Response,
+    if_match: Optional[str] = Header(default=None, alias="If-Match"),
     current_admin: UserModel = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ) -> Response:
-    """Remove cliente da base de dados."""
+    """Remove cliente da base de dados com validação rigorosa de integridade referencial e concorrência."""
     _apply_common_headers(request, response)
 
     client = db.query(ClientModel).filter(ClientModel.id == id).first()
@@ -354,18 +355,31 @@ async def delete_client(
             code="NOT_FOUND",
         )
 
-    # Bloqueia exclusão de clientes com histórico de compras
+    # Concorrência otimista: valida se o cadastro do cliente sofreu alterações concorrentes
+    current_etag = _compute_client_etag(client)
+    verify_if_match(if_match, current_etag)
+
+    # Bloqueia exclusão de clientes com histórico de compras/vendas
     sales_count = db.query(SaleModel).filter(SaleModel.client_id == id).count()
     if sales_count > 0:
         raise ConflictException(
             title="Recurso em Uso",
-            detail="O cliente possui vendas associadas e não pode ser removido.",
+            detail=f"O cliente '{client.name}' possui {sales_count} venda(s) associada(s) no histórico e não pode ser removido.",
             code="RESOURCE_IN_USE",
             type_uri="https://api.bookstore.dev/errors/resource-in-use",
         )
 
-    db.delete(client)
-    db.commit()
+    try:
+        db.delete(client)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise ConflictException(
+            title="Recurso em Uso",
+            detail=f"Não é possível remover o cliente '{client.name}' devido a vínculos no histórico de transações.",
+            code="RESOURCE_IN_USE",
+            type_uri="https://api.bookstore.dev/errors/resource-in-use",
+        )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT, headers=dict(response.headers))
 

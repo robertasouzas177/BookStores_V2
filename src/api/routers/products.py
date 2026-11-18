@@ -297,16 +297,17 @@ async def update_product(
     "/{id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Remover produto",
-    description="Exclui o livro do catálogo. Retorna 409 se houver histórico de vendas vinculado.",
+    description="Exclui o livro do catálogo. Retorna 409 se houver histórico de vendas vinculado ou precondição falhar.",
 )
 async def delete_product(
     id: str,
     request: Request,
     response: Response,
+    if_match: Optional[str] = Header(default=None, alias="If-Match"),
     current_admin: UserModel = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ) -> Response:
-    """Exclui produto com validação de integridade referencial."""
+    """Exclui produto com validação rigorosa de integridade referencial e concorrência."""
     _apply_common_headers(request, response)
 
     product = db.query(ProductModel).filter(ProductModel.id == id).first()
@@ -316,17 +317,30 @@ async def delete_product(
             code="NOT_FOUND",
         )
 
+    # Concorrência otimista: valida se o livro sofreu alterações concorrentes
+    current_etag = _compute_product_etag(product)
+    verify_if_match(if_match, current_etag)
+
     # Regra de Integridade: impede exclusão de produto com histórico de vendas
     sales_count = db.query(SaleItemModel).filter(SaleItemModel.product_id == id).count()
     if sales_count > 0:
         raise ConflictException(
             title="Recurso em Uso",
-            detail="O produto possui vendas associadas e não pode ser removido.",
+            detail=f"O livro '{product.title}' possui {sales_count} item(ns) de venda associado(s) e não pode ser removido.",
             code="RESOURCE_IN_USE",
             type_uri="https://api.bookstore.dev/errors/resource-in-use",
         )
 
-    db.delete(product)
-    db.commit()
+    try:
+        db.delete(product)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise ConflictException(
+            title="Recurso em Uso",
+            detail=f"O produto '{product.title}' possui vínculos no histórico do banco e não pode ser excluído.",
+            code="RESOURCE_IN_USE",
+            type_uri="https://api.bookstore.dev/errors/resource-in-use",
+        )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT, headers=dict(response.headers))

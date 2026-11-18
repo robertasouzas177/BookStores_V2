@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tela 2: Produtos & Estoque — Bookstore API (P2)</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+
+  <!-- TopBar Injetada via Navbar Component -->
+  <header class="topbar" id="navbarContainer"></header>
+
+  <main class="main-wrapper">
+
+    <!-- Header da Tela com Navegação Contínua -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2 class="card-title" style="font-size:1.6rem; color:#38bdf8;">📖 Módulo 1: Catálogo de Produtos & Controle de Estoque</h2>
+        <p style="color:var(--text-muted); font-size:0.88rem;">
+          Endpoints: <code>GET, PATCH, DELETE /api/v1/products</code> &bull; Concorrência: <code>If-Match (412)</code> &bull; Cache: <code>ETag (304)</code> &bull; RFC 9457
+        </p>
+      </div>
+      <button class="btn-back-dashboard" onclick="window.location.href='../index.html'">
+        &larr; Voltar ao Dashboard
+      </button>
+    </div>
+
+    <!-- Presets de Demonstração Rápida para a Banca (P2) -->
+    <div class="presets-box" style="margin-bottom:18px;">
+      <div class="presets-label">⚡ Demonstrações Obrigatórias para a Banca (Clique para executar em 1 clique):</div>
+      <div class="presets-grid">
+        <button type="button" class="btn-preset" onclick="quickDemoProduct('search_duna')" style="border-left:4px solid #38bdf8;" title="GET /products?search=duna">
+          🔍 1. Busca por "Duna"
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoProduct('filter_instock')" style="border-left:4px solid #38bdf8;" title="GET /products?inStock=true">
+          📦 2. Filtro em Estoque
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoProduct('update_stock')" style="border-left:4px solid #10b981;" title="PATCH /products/{id}">
+          ✏️ 3. Atualizar Estoque (+5)
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoProduct('etag_304')" style="border-left:4px solid #10b981;" title="If-None-Match com ETag atual">
+          ⚡ 4. Cache ETag (304)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoProduct('concurrency_412')" style="border-left:4px solid #f59e0b;" title="If-Match divergente">
+          ⚠️ 5. Concorrência (412)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoProduct('integrity_409')" style="border-left:4px solid #ef4444;" title="DELETE de livro com vendas">
+          🚫 6. Integridade (409)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoProduct('validation_422')" style="border-left:4px solid #ec4899;" title="PATCH com valores negativos">
+          ❌ 7. Validação (422)
+        </button>
+      </div>
+    </div>
+
+    <!-- Barra de Filtros, Pesquisa e Ordenação -->
+    <div class="filter-bar">
+      <!-- Campo Busca Textual (search) -->
+      <div class="filter-group">
+        <label for="productSearchInput" style="font-size:0.85rem; font-weight:700; color:var(--text-muted);">Buscar:</label>
+        <div style="display:flex; gap:6px;">
+          <input
+            type="text"
+            id="productSearchInput"
+            class="form-control"
+            placeholder="Título ou autor..."
+            style="padding:6px 12px; font-size:0.88rem; width:220px;"
+            onkeydown="if(event.key==='Enter') applyProductFilters()"
+          />
+          <button type="button" class="btn-page" onclick="applyProductFilters()">Filtrar</button>
+          <button type="button" class="btn-page" onclick="clearProductSearch()" title="Limpar busca">✕</button>
+        </div>
+      </div>
+
+      <!-- Filtro inStock -->
+      <div class="filter-group">
+        <span style="font-size:0.85rem; font-weight:700; color:var(--text-muted);">Estoque (inStock):</span>
+        <button type="button" id="btnStockAll" class="btn-filter-toggle active" onclick="setProductStockFilter(null)">Todos</button>
+        <button type="button" id="btnStockIn" class="btn-filter-toggle" onclick="setProductStockFilter(true)">Disponíveis (&gt;0)</button>
+        <button type="button" id="btnStockOut" class="btn-filter-toggle" onclick="setProductStockFilter(false)">Esgotados (=0)</button>
+      </div>
+
+      <!-- Ordenação -->
+      <div class="filter-group">
+        <label for="productSortSelect" style="font-size:0.85rem; font-weight:700; color:var(--text-muted);">Ordenar:</label>
+        <select id="productSortSelect" class="form-control" style="padding:6px 10px; font-size:0.85rem; width:170px;" onchange="applyProductFilters()">
+          <option value="-createdAt">Mais Recentes</option>
+          <option value="title">Título (A-Z)</option>
+          <option value="-title">Título (Z-A)</option>
+          <option value="price">Menor Preço</option>
+          <option value="-price">Maior Preço</option>
+          <option value="-stock">Maior Estoque</option>
+          <option value="stock">Menor Estoque</option>
+        </select>
+      </div>
+
+      <button type="button" class="btn-page" onclick="loadProducts(false)" title="Recarregar catálogo">🔄 Atualizar</button>
+    </div>
+
+    <!-- Layout Central Master-Detail -->
+    <div class="products-layout">
+
+      <!-- Coluna Esquerda: Tabela de Produtos (Master) -->
+      <div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width:110px;">Código</th>
+                <th>Título &bull; Autor</th>
+                <th style="width:130px;">ISBN</th>
+                <th style="width:100px;">Preço</th>
+                <th style="width:90px;">Estoque</th>
+                <th style="width:130px; text-align:center;">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="productsTableBody">
+              <tr>
+                <td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted);">
+                  Carregando catálogo de livros...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Controles e Metadados de Paginação Detalhados -->
+        <div class="pagination-controls" style="flex-wrap:wrap; gap:10px;">
+          <button type="button" id="btnPrevPage" class="btn-page" onclick="changeProductPage(-1)" disabled>
+            &larr; Anterior
+          </button>
+
+          <div style="font-size:0.85rem; color:var(--text-muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span>Página: <strong id="metaPage" style="color:#f8fafc;">1</strong> / <span id="metaTotalPages">1</span></span>
+            <span>&bull;</span>
+            <span>Limite: <strong id="metaLimit" style="color:#38bdf8;">10</strong></span>
+            <span>&bull;</span>
+            <span>Total: <strong id="metaTotalItems" style="color:#10b981;">0</strong> itens</span>
+            <span>&bull;</span>
+            <span>Tem Próxima (hasNext): <strong id="metaHasNext" style="color:#94a3b8;">Não</strong></span>
+          </div>
+
+          <button type="button" id="btnNextPage" class="btn-page" onclick="changeProductPage(1)" disabled>
+            Próxima &rarr;
+          </button>
+        </div>
+      </div>
+
+      <!-- Coluna Direita: Painel de Detalhes do Livro Selecionado (Detail) -->
+      <div class="product-detail-box">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+          <h3 style="font-size:1.05rem; font-weight:700; color:#38bdf8;">Ficha do Livro (Master-Detail)</h3>
+          <span id="detailBadgeStock" class="stock-badge high">—</span>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">Título:</div>
+          <div id="detailTitle" class="detail-value" style="font-size:1.15rem; color:#ffffff;">Nenhum livro selecionado</div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">Autor / Autora:</div>
+          <div id="detailAuthor" class="detail-value" style="color:#cbd5e1;">—</div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="detail-field">
+            <div class="detail-label">Código (code):</div>
+            <div id="detailCode" class="detail-value" style="font-family:var(--font-mono); font-size:0.85rem; color:#93c5fd;">—</div>
+          </div>
+          <div class="detail-field">
+            <div class="detail-label">ISBN:</div>
+            <div id="detailIsbn" class="detail-value" style="font-family:var(--font-mono); font-size:0.85rem;">—</div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="detail-field">
+            <div class="detail-label">Preço:</div>
+            <div id="detailPrice" class="detail-value" style="font-size:1.2rem; color:#10b981;">R$ 0,00</div>
+          </div>
+          <div class="detail-field">
+            <div class="detail-label">Estoque Atual:</div>
+            <div id="detailStock" class="detail-value" style="font-size:1.2rem; color:#f8fafc;">0 un</div>
+          </div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">ID Firestore (Doc):</div>
+          <div id="detailId" class="detail-value" style="font-family:var(--font-mono); font-size:0.75rem; color:#38bdf8; word-break:break-all;">—</div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">Data de Criação (createdAt):</div>
+          <div id="detailCreatedAt" class="detail-value" style="font-size:0.8rem; color:#cbd5e1;">—</div>
+        </div>
+
+        <div class="detail-field">
+          <div class="detail-label">ETag Individual (Versão):</div>
+          <div id="detailETag" class="detail-value" style="font-family:var(--font-mono); font-size:0.75rem; color:#e2e8f0; word-break:break-all; background:#030712; padding:4px 8px; border-radius:4px; border:1px solid #1e293b;">—</div>
+        </div>
+
+        <!-- Botões de Ação para ADMIN (com restrição visual para SELLER) -->
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px; border-top:1px solid var(--border-color); padding-top:14px;">
+          <button type="button" id="btnEditProduct" class="btn-submit" style="padding:10px; font-size:0.9rem;" onclick="openProductEditModal()">
+            ✏️ Atualizar Preço / Estoque (PATCH)
+          </button>
+          <button type="button" id="btnDeleteProduct" class="btn-logout" style="width:100%; padding:9px; text-align:center;" onclick="handleDeleteProduct()">
+            🗑️ Excluir Livro do Catálogo (DELETE)
+          </button>
+          <div id="sellerRestrictedNote" class="hidden" style="font-size:0.75rem; color:#f87171; text-align:center; padding:6px; background:#450a0a; border-radius:4px; border:1px solid #7f1d1d;">
+            🛡️ Perfil SELLER: Operações de escrita são bloqueadas contratualmente (HTTP 403 Forbidden).
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================================================
+         PAINEL TÉCNICO OBRIGATÓRIO (OBSERVABILIDADE REST E CONTRATOS RFC 9457)
+         ======================================================================== -->
+    <div class="tech-panel" style="margin-top:24px;">
+      <div class="tech-panel-header">
+        <h3 style="font-size:1.05rem; color:#f1f5f9;">⚙️ Painel Técnico & Observabilidade REST</h3>
+        <span id="prodTechStatusBadge" class="role-badge" style="background:#064e3b; border-color:#059669; color:#6ee7b7;">200 OK</span>
+      </div>
+
+      <div class="tech-grid">
+        <!-- 1. Last Status Code -->
+        <div class="tech-box">
+          <div class="tech-box-title">Last Status Code</div>
+          <div id="prodTechHttpStatus" style="font-size:1.25rem; font-weight:800; color:#10b981;">HTTP 200 OK</div>
+          <div id="prodTechStatusDetail" style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Operação concluída com sucesso.</div>
+        </div>
+
+        <!-- 2. ETag Atual -->
+        <div class="tech-box">
+          <div class="tech-box-title">ETag Atual (Coleção / Recurso)</div>
+          <div id="prodTechETag" class="tech-box-code">—</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Hash de validação de cache e concorrência.</div>
+        </div>
+
+        <!-- 3. If-Match Utilizado -->
+        <div class="tech-box">
+          <div class="tech-box-title">If-Match Utilizado (PATCH)</div>
+          <div id="prodTechIfMatch" class="tech-box-code" style="color:#fde68a;">(Nenhum)</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Precondição para evitar perda de atualizações (412).</div>
+        </div>
+
+        <!-- 4. If-None-Match Utilizado -->
+        <div class="tech-box">
+          <div class="tech-box-title">If-None-Match Utilizado (GET)</div>
+          <div id="prodTechIfNoneMatch" class="tech-box-code" style="color:#7dd3fc;">(Nenhum)</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Revalidação condicional de cache (304 Not Modified).</div>
+        </div>
+
+        <!-- 5. X-Request-Id -->
+        <div class="tech-box">
+          <div class="tech-box-title">X-Request-Id (Trace Context)</div>
+          <div id="prodTechRequestId" class="tech-box-code" style="color:#38bdf8;">8NV1c7Q4TCYGcsuPch8I</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Identificador único correlacionado de ponta a ponta.</div>
+        </div>
+
+        <!-- 6. RFC 9457 Code -->
+        <div class="tech-box">
+          <div class="tech-box-title">RFC 9457 Code (Erro Canônico)</div>
+          <div id="prodTechRfcCode" style="font-family:var(--font-mono); font-size:1.15rem; font-weight:700; color:#38bdf8;">NENHUM ERRO</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Código de erro estável para clientes automatizados.</div>
+        </div>
+      </div>
+
+      <!-- Box de Exibição de Resposta RFC 9457 em caso de erro -->
+      <div id="prodRfcErrorBox" class="rfc-box hidden" style="margin-top:16px;">
+        <div class="rfc-box-header">
+          <span class="rfc-box-title">🚨 Resposta RFC 9457 (Problem Details: application/problem+json)</span>
+          <span id="prodRfcStatusTag" class="role-badge" style="background:#7f1d1d; border-color:#dc2626; color:#fca5a5;">409 CONFLICT</span>
+        </div>
+        <pre id="prodRfcErrorJson" class="rfc-json-content"></pre>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Modal de Edição Parcial de Produto (PATCH /api/v1/products/{id}) -->
+  <div id="productEditModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+        <h3 style="font-size:1.2rem; color:#f1f5f9;">Atualizar Produto (PATCH)</h3>
+        <button type="button" class="btn-toggle-pass" onclick="closeProductEditModal()">✕</button>
+      </div>
+
+      <form onsubmit="handleSaveProductEdit(event)">
+        <div class="form-group">
+          <label class="form-label">Livro Selecionado:</label>
+          <div id="modalEditBookTitle" style="font-size:1rem; font-weight:700; color:#38bdf8; margin-bottom:12px;">—</div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px;">
+          <div class="form-group">
+            <label for="editPriceInput" class="form-label">Preço (R$ Inteiro):</label>
+            <input
+              type="number"
+              id="editPriceInput"
+              class="form-control"
+              step="1"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label for="editStockInput" class="form-label">Estoque (Unidades):</label>
+            <input
+              type="number"
+              id="editStockInput"
+              class="form-control"
+              step="1"
+              required
+            />
+          </div>
+        </div>
+
+        <!-- Controle de Concorrência Otimista (If-Match) -->
+        <div style="background:#0f172a; border:1px solid #334155; padding:12px; border-radius:6px; margin-bottom:20px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            <input type="checkbox" id="checkIfMatch" checked style="width:16px; height:16px;" />
+            <label for="checkIfMatch" style="font-size:0.85rem; font-weight:600; color:#e2e8f0; cursor:pointer;">
+              Enviar cabeçalho <code>If-Match</code> (Concorrência Otimista)
+            </label>
+          </div>
+          <div style="font-size:0.75rem; color:var(--text-muted);">
+            ETag enviado: <code id="modalIfMatchValue" style="color:#38bdf8;">W/"..."</code>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:8px;">
+            <button type="button" class="btn-preset error" style="padding:4px 8px; font-size:0.75rem;" onclick="corruptIfMatchHeader()">
+              ⚠️ Corromper ETag (Forçar 412)
+            </button>
+            <button type="button" class="btn-preset" style="padding:4px 8px; font-size:0.75rem; border-color:#38bdf8;" onclick="resetIfMatchHeader()">
+              ↺ Restaurar ETag Válido
+            </button>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn-page" onclick="closeProductEditModal()">Cancelar</button>
+          <button type="submit" id="btnSaveProductSubmit" class="btn-submit" style="width:auto; padding:10px 20px;">
+            Salvar Alterações (PATCH)
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <footer>
+    <div>
+      <strong>Bookstore API &bull; P2:</strong> <code>GET, PATCH, DELETE /products</code> | <code>ETag (304)</code> | <code>If-Match (412)</code> | <code>RFC 9457</code>
+    </div>
+    <div>
+      Apresentadora: <strong>Roberta Souza</strong> &bull; Engenharia de Software
+    </div>
+  </footer>
+
+  <script src="../components/session.js"></script>
+  <script src="../components/api.js"></script>
+  <script src="../components/navbar.js"></script>
+  <script>
+    // Validação de Sessão: exige login prévio
+    Session.requireAuth('01_login.html');
+
+    Navbar.render({
+      targetElementId: 'navbarContainer',
+      homeUrl: '../index.html',
+      loginUrl: '01_login.html'
+    });
+
+    const productState = {
+      page: 1,
+      limit: 10,
+      search: '',
+      inStock: null,
+      sort: '-createdAt',
+      selectedProduct: null,
+      collectionETag: 'W/"33a64df551425fcc55e4d42a148795d9"',
+      lastIfMatch: '(Nenhum)',
+      lastIfNoneMatch: '(Nenhum)'
+    };
+
+    function applyRoleRestrictions() {
+      const isSeller = Session.getRole() === 'SELLER';
+      const btnEdit = document.getElementById('btnEditProduct');
+      const btnDelete = document.getElementById('btnDeleteProduct');
+      const sellerNote = document.getElementById('sellerRestrictedNote');
+
+      if (isSeller) {
+        if (btnEdit) btnEdit.style.opacity = '0.5';
+        if (btnDelete) btnDelete.style.opacity = '0.5';
+        if (sellerNote) sellerNote.classList.remove('hidden');
+      } else {
+        if (btnEdit) btnEdit.style.opacity = '1';
+        if (btnDelete) btnDelete.style.opacity = '1';
+        if (sellerNote) sellerNote.classList.add('hidden');
+      }
+    }
+
+    function setProductStockFilter(val) {
+      productState.inStock = val;
+      productState.page = 1;
+
+      document.getElementById('btnStockAll').className = 'btn-filter-toggle' + (val === null ? ' active' : '');
+      document.getElementById('btnStockIn').className = 'btn-filter-toggle' + (val === true ? ' active' : '');
+      document.getElementById('btnStockOut').className = 'btn-filter-toggle' + (val === false ? ' active' : '');
+
+      loadProducts(false);
+    }
+
+    function applyProductFilters() {
+      productState.search = document.getElementById('productSearchInput').value.trim();
+      productState.sort = document.getElementById('productSortSelect').value;
+      productState.page = 1;
+      loadProducts(false);
+    }
+
+    function clearProductSearch() {
+      document.getElementById('productSearchInput').value = '';
+      productState.search = '';
+      productState.page = 1;
+      loadProducts(false);
+    }
+
+    function changeProductPage(delta) {
+      productState.page += delta;
+      if (productState.page < 1) productState.page = 1;
+      loadProducts(false);
+    }
+
+    async function loadProducts(useIfNoneMatch = false) {
+      const ifNoneMatchValue = useIfNoneMatch ? productState.collectionETag : null;
+      productState.lastIfNoneMatch = ifNoneMatchValue ? ifNoneMatchValue : '(Nenhum)';
+      productState.lastIfMatch = '(Nenhum)';
+
+      document.getElementById('prodTechIfNoneMatch').textContent = productState.lastIfNoneMatch;
+      document.getElementById('prodTechIfMatch').textContent = productState.lastIfMatch;
+      document.getElementById('prodRfcErrorBox').classList.add('hidden');
+
+      const result = await Api.getProducts({
+        page: productState.page,
+        limit: productState.limit,
+        search: productState.search,
+        inStock: productState.inStock,
+        sort: productState.sort,
+        ifNoneMatch: ifNoneMatchValue
+      });
+
+      if (result.status === 304) {
+        updateProductTechConsole(304, 'Not Modified', result.etag || productState.collectionETag, result.requestId, 'NENHUM ERRO', 'Recurso não modificado no servidor (Cache 304 validado via If-None-Match).');
+        return;
+      }
+
+      if (result.ok) {
+        productState.collectionETag = result.etag || productState.collectionETag;
+        updateProductTechConsole(200, 'OK', productState.collectionETag, result.requestId, 'NENHUM ERRO', 'Catálogo de livros carregado com sucesso via GET /api/v1/products.');
+        const items = (result.data && Array.isArray(result.data.data)) ? result.data.data : (Array.isArray(result.data) ? result.data : []);
+        const meta = (result.data && result.data.meta) ? result.data.meta : (result.meta || {});
+        renderProductsTable(items, meta);
+      }
+    }
+
+    function renderProductsTable(products, meta) {
+      const tbody = document.getElementById('productsTableBody');
+      tbody.innerHTML = '';
+
+      const totalItems = meta.totalItems !== undefined ? meta.totalItems : products.length;
+      const totalPages = meta.totalPages || Math.ceil(totalItems / meta.limit) || 1;
+      const hasNext = meta.page < totalPages;
+
+      document.getElementById('metaPage').textContent = meta.page;
+      document.getElementById('metaTotalPages').textContent = totalPages;
+      document.getElementById('metaLimit').textContent = meta.limit;
+      document.getElementById('metaTotalItems').textContent = totalItems;
+      document.getElementById('metaHasNext').textContent = hasNext ? 'Sim' : 'Não';
+      document.getElementById('metaHasNext').style.color = hasNext ? '#10b981' : '#94a3b8';
+
+      document.getElementById('btnPrevPage').disabled = meta.page <= 1;
+      document.getElementById('btnNextPage').disabled = !hasNext;
+
+      if (!products || products.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:28px; color:var(--text-muted);">Nenhum livro localizado para os filtros informados.</td></tr>`;
+        return;
+      }
+
+      products.forEach(p => {
+        const tr = document.createElement('tr');
+        if (productState.selectedProduct && productState.selectedProduct.id === p.id) {
+          tr.className = 'selected';
+        }
+        tr.onclick = () => selectProduct(p);
+
+        let stockBadgeHtml;
+        if (p.stock >= 5) {
+          stockBadgeHtml = `<span class="stock-badge high">${p.stock} un</span>`;
+        } else if (p.stock > 0) {
+          stockBadgeHtml = `<span class="stock-badge low">${p.stock} un</span>`;
+        } else {
+          stockBadgeHtml = `<span class="stock-badge zero">0 (Esgotado)</span>`;
+        }
+
+        tr.innerHTML = `
+          <td><code style="color:#93c5fd; font-size:0.8rem;">${p.code}</code></td>
+          <td>
+            <div style="font-weight:700; color:#f8fafc;">${p.title}</div>
+            <div style="font-size:0.8rem; color:var(--text-muted);">${p.author}</div>
+          </td>
+          <td><code style="font-size:0.8rem; color:#cbd5e1;">${p.isbn}</code></td>
+          <td><strong style="color:#10b981;">R$ ${p.price},00</strong></td>
+          <td>${stockBadgeHtml}</td>
+          <td style="text-align:center;">
+            <button type="button" class="btn-page" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); selectProductById('${p.id}')">Ver</button>
+            <button type="button" class="btn-page" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); openProductEditModal('${p.id}')">✏️</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      if (!productState.selectedProduct && products.length > 0) {
+        selectProduct(products[0]);
+      }
+    }
+
+    function selectProduct(p) {
+      if (!p) return;
+      productState.selectedProduct = p;
+
+      document.querySelectorAll('#productsTableBody tr').forEach(row => row.classList.remove('selected'));
+      document.getElementById('detailTitle').textContent = p.title;
+      document.getElementById('detailAuthor').textContent = p.author;
+      document.getElementById('detailCode').textContent = p.code;
+      document.getElementById('detailIsbn').textContent = p.isbn;
+      document.getElementById('detailPrice').textContent = `R$ ${p.price},00`;
+      document.getElementById('detailStock').textContent = `${p.stock} un`;
+      document.getElementById('detailId').textContent = p.id;
+
+      // Data de Criação formatada
+      let formattedDate = p.createdAt;
+      try {
+        const d = new Date(p.createdAt);
+        if (!isNaN(d.getTime())) {
+          formattedDate = d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR');
+        }
+      } catch (e) {}
+      document.getElementById('detailCreatedAt').textContent = formattedDate;
+
+      const etag = p._etag || Api.computeProductETag(p);
+      document.getElementById('detailETag').textContent = etag;
+
+      const badge = document.getElementById('detailBadgeStock');
+      if (p.stock >= 5) {
+        badge.className = 'stock-badge high';
+        badge.textContent = 'Disponível';
+      } else if (p.stock > 0) {
+        badge.className = 'stock-badge low';
+        badge.textContent = 'Estoque Baixo';
+      } else {
+        badge.className = 'stock-badge zero';
+        badge.textContent = 'Esgotado';
+      }
+    }
+
+    async function selectProductById(id) {
+      const res = await Api.getProductById(id);
+      if (res.ok && res.data) {
+        if (res.etag) res.data._etag = res.etag;
+        selectProduct(res.data);
+        productState.lastIfMatch = '(Nenhum)';
+        productState.lastIfNoneMatch = '(Nenhum)';
+        document.getElementById('prodTechIfMatch').textContent = '(Nenhum)';
+        document.getElementById('prodTechIfNoneMatch').textContent = '(Nenhum)';
+        updateProductTechConsole(200, 'OK', res.etag, res.requestId, 'NENHUM ERRO', `GET /api/v1/products/${id} executado com sucesso.`);
+      }
+    }
+
+    async function openProductEditModal(productId) {
+      if (productId) await selectProductById(productId);
+      let p = productState.selectedProduct;
+      if (!p) {
+        alert('Selecione um livro para editar.');
+        return;
+      }
+
+      // Restrição de Perfil: SELLER não pode atualizar (403 Forbidden)
+      if (Session.getRole() === 'SELLER') {
+        renderProductRfcError({
+          type: "https://api.bookstore.dev/errors/forbidden",
+          title: "Acesso Proibido",
+          status: 403,
+          detail: "Operadores com perfil SELLER não possuem permissão para atualizar dados de produtos.",
+          instance: `/api/v1/products/${p.id}`,
+          code: "FORBIDDEN"
+        }, 403);
+        return;
+      }
+
+      // Garante sincronização do ETag oficial com o backend via GET antes da edição
+      if (!p._etag && p.id) {
+        const res = await Api.getProductById(p.id);
+        if (res.ok && res.data) {
+          if (res.etag) res.data._etag = res.etag;
+          selectProduct(res.data);
+          p = res.data;
+        }
+      }
+
+      document.getElementById('modalEditBookTitle').textContent = `${p.title} (${p.author})`;
+      document.getElementById('editPriceInput').value = p.price;
+      document.getElementById('editStockInput').value = p.stock;
+
+      resetIfMatchHeader();
+      document.getElementById('checkIfMatch').checked = true;
+      document.getElementById('productEditModal').classList.remove('hidden');
+    }
+
+    function closeProductEditModal() {
+      document.getElementById('productEditModal').classList.add('hidden');
+    }
+
+    function corruptIfMatchHeader() {
+      document.getElementById('modalIfMatchValue').textContent = 'W/"etag_desatualizado_corrompido_412"';
+    }
+
+    function resetIfMatchHeader() {
+      const p = productState.selectedProduct;
+      if (p) {
+        const etag = p._etag || Api.computeProductETag(p);
+        document.getElementById('modalIfMatchValue').textContent = etag;
+      }
+    }
+
+    async function handleSaveProductEdit(e) {
+      e.preventDefault();
+      const p = productState.selectedProduct;
+      if (!p) return;
+
+      const price = parseInt(document.getElementById('editPriceInput').value, 10);
+      const stock = parseInt(document.getElementById('editStockInput').value, 10);
+      const useIfMatch = document.getElementById('checkIfMatch').checked;
+      const sentIfMatch = document.getElementById('modalIfMatchValue').textContent;
+
+      productState.lastIfMatch = useIfMatch ? sentIfMatch : '(Nenhum)';
+      productState.lastIfNoneMatch = '(Nenhum)';
+      document.getElementById('prodTechIfMatch').textContent = productState.lastIfMatch;
+      document.getElementById('prodTechIfNoneMatch').textContent = '(Nenhum)';
+
+      const result = await Api.updateProduct(p.id, { price, stock }, useIfMatch ? sentIfMatch : null);
+
+      if (!result.ok) {
+        closeProductEditModal();
+        renderProductRfcError(result.error, result.status);
+      } else {
+        closeProductEditModal();
+        if (result.etag) result.data._etag = result.etag;
+        selectProduct(result.data);
+        loadProducts(false);
+        updateProductTechConsole(200, 'OK', result.etag, result.requestId, 'NENHUM ERRO', `Livro atualizado com sucesso via PATCH! Novo ETag emitido: ${result.etag}`);
+      }
+    }
+
+    async function handleDeleteProduct() {
+      const p = productState.selectedProduct;
+      if (!p) {
+        alert('Selecione um livro para excluir.');
+        return;
+      }
+
+      if (Session.getRole() === 'SELLER') {
+        renderProductRfcError({
+          type: "https://api.bookstore.dev/errors/forbidden",
+          title: "Acesso Proibido",
+          status: 403,
+          detail: "Operadores com perfil SELLER não possuem permissão para excluir produtos.",
+          instance: `/api/v1/products/${p.id}`,
+          code: "FORBIDDEN"
+        }, 403);
+        return;
+      }
+
+      if (!confirm(`Deseja realmente excluir o livro "${p.title}"?`)) return;
+
+      const currentEtag = p._etag || Api.computeProductETag(p);
+      productState.lastIfMatch = currentEtag;
+      productState.lastIfNoneMatch = '(Nenhum)';
+      document.getElementById('prodTechIfMatch').textContent = currentEtag;
+      document.getElementById('prodTechIfNoneMatch').textContent = '(Nenhum)';
+
+      const result = await Api.deleteProduct(p.id, currentEtag);
+
+      if (!result.ok) {
+        renderProductRfcError(result.error, result.status);
+      } else {
+        productState.selectedProduct = null;
+        loadProducts(false);
+        updateProductTechConsole(204, 'No Content', '—', result.requestId, 'NENHUM ERRO', 'Livro excluído com sucesso do catálogo (204 No Content).');
+      }
+    }
+
+    function renderProductRfcError(problemJson, httpStatus) {
+      updateProductTechConsole(httpStatus, problemJson.title || 'Error', productState.collectionETag, '8NV1c7Q4TCYGcsuPch8I', problemJson.code || 'ERROR', problemJson.detail || 'Ocorreu um erro.');
+
+      const box = document.getElementById('prodRfcErrorBox');
+      const tag = document.getElementById('prodRfcStatusTag');
+      const json = document.getElementById('prodRfcErrorJson');
+
+      tag.textContent = `${httpStatus} ${problemJson.code || ''}`;
+      json.textContent = JSON.stringify(problemJson, null, 2);
+      box.classList.remove('hidden');
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function updateProductTechConsole(statusNum, statusTitle, etag, reqId, rfcCode, detailMsg) {
+      const badge = document.getElementById('prodTechStatusBadge');
+      const statusElem = document.getElementById('prodTechHttpStatus');
+      const detailElem = document.getElementById('prodTechStatusDetail');
+      const etagElem = document.getElementById('prodTechETag');
+      const reqIdElem = document.getElementById('prodTechRequestId');
+      const rfcCodeElem = document.getElementById('prodTechRfcCode');
+
+      statusElem.textContent = `HTTP ${statusNum} ${statusTitle}`;
+      detailElem.textContent = detailMsg;
+      etagElem.textContent = etag;
+      reqIdElem.textContent = reqId;
+      rfcCodeElem.textContent = rfcCode;
+
+      if (statusNum >= 200 && statusNum < 300) {
+        badge.className = 'role-badge';
+        badge.style.background = '#064e3b';
+        badge.style.borderColor = '#059669';
+        badge.style.color = '#6ee7b7';
+        badge.textContent = `${statusNum} ${statusTitle}`;
+        statusElem.style.color = '#10b981';
+        rfcCodeElem.style.color = '#38bdf8';
+      } else if (statusNum === 304) {
+        badge.className = 'role-badge';
+        badge.style.background = '#0c4a6e';
+        badge.style.borderColor = '#0284c7';
+        badge.style.color = '#7dd3fc';
+        badge.textContent = '304 NOT MODIFIED';
+        statusElem.style.color = '#38bdf8';
+        rfcCodeElem.style.color = '#38bdf8';
+      } else {
+        badge.className = 'role-badge';
+        badge.style.background = '#7f1d1d';
+        badge.style.borderColor = '#dc2626';
+        badge.style.color = '#fca5a5';
+        badge.textContent = `${statusNum} ${rfcCode}`;
+        statusElem.style.color = '#f87171';
+        rfcCodeElem.style.color = '#f87171';
+      }
+    }
+
+    function quickDemoProduct(scenario) {
+      if (scenario === 'search_duna') {
+        document.getElementById('productSearchInput').value = 'Duna';
+        applyProductFilters();
+      } else if (scenario === 'filter_instock') {
+        setProductStockFilter(true);
+      } else if (scenario === 'update_stock') {
+        selectProductById('PRD2c7Q4TCYGcsuPch88').then(() => {
+          const p = productState.selectedProduct;
+          if (p) {
+            const currentStock = p.stock;
+            const newStock = currentStock + 5;
+            const currentEtag = p._etag || Api.computeProductETag(p);
+            Api.updateProduct(p.id, { price: p.price, stock: newStock }, currentEtag).then(res => {
+              if (res.ok) {
+                if (res.etag) res.data._etag = res.etag;
+                selectProduct(res.data);
+                loadProducts(false);
+                productState.lastIfMatch = res.etag || currentEtag;
+                document.getElementById('prodTechIfMatch').textContent = productState.lastIfMatch;
+                updateProductTechConsole(200, 'OK', res.etag, res.requestId, 'NENHUM ERRO', `Estoque atualizado de ${currentStock} para ${newStock} un com sucesso via PATCH!`);
+              }
+            });
+          }
+        });
+      } else if (scenario === 'etag_304') {
+        loadProducts(true);
+      } else if (scenario === 'concurrency_412') {
+        selectProductById('KIYBXACS6uVj5DbKEsPQ').then(() => {
+          openProductEditModal();
+          corruptIfMatchHeader();
+          setTimeout(() => {
+            document.getElementById('btnSaveProductSubmit').click();
+          }, 300);
+        });
+      } else if (scenario === 'integrity_409') {
+        selectProductById('KIYBXACS6uVj5DbKEsPQ').then(() => {
+          handleDeleteProduct();
+        });
+      } else if (scenario === 'validation_422') {
+        selectProductById('KIYBXACS6uVj5DbKEsPQ').then(() => {
+          openProductEditModal();
+          document.getElementById('editStockInput').value = '-5';
+          document.getElementById('editPriceInput').value = '-10';
+          setTimeout(() => {
+            document.getElementById('btnSaveProductSubmit').click();
+          }, 300);
+        });
+      }
+    }
+
+    // Inicialização da Tela
+    applyRoleRestrictions();
+    loadProducts(false);
+  </script>
+</body>
+</html>

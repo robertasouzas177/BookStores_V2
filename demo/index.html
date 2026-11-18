@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Hub — Bookstore API (P2)</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+  <!-- TopBar Injetada via Navbar Component -->
+  <header class="topbar" id="navbarContainer"></header>
+
+  <!-- ========================================================================
+       CONTEÚDO PRINCIPAL DO DASHBOARD
+       ======================================================================== -->
+  <main class="main-wrapper">
+
+    <!-- Banner de Boas-vindas e Contexto do Operador -->
+    <div class="welcome-banner">
+      <div class="welcome-text">
+        <h2 id="welcomeGreeting">Carregando painel...</h2>
+        <p id="welcomeDescription">Painel central de controle e navegação acadêmica da Bookstore API.</p>
+        <div class="welcome-meta">
+          <span>Operador: <strong id="welcomeUserName">—</strong></span>
+          <span>&bull;</span>
+          <span>E-mail: <code id="welcomeUserEmail">—</code></span>
+          <span>&bull;</span>
+          <span>ID: <code id="welcomeUserId">—</code></span>
+        </div>
+      </div>
+      <div id="welcomeBadgeContainer">
+        <!-- Badge de perfil injetado dinamicamente -->
+      </div>
+    </div>
+
+    <!-- Indicador de Alerta de Permissões RBAC -->
+    <div id="rbacNoticeBanner" class="alert alert-info" style="margin-bottom: 20px;">
+      <span class="alert-icon">🛡️</span>
+      <div id="rbacNoticeText">
+        Verificando perfil de acesso...
+      </div>
+    </div>
+
+    <!-- ======================================================================
+         CARDS DE INDICADORES (KPIS)
+         ====================================================================== -->
+    <div class="kpi-grid">
+      <!-- KPI 1: Livros -->
+      <div class="kpi-card" onclick="window.location.href='pages/02_produtos.html'">
+        <div class="kpi-header">
+          <span class="kpi-title">Livros no Catálogo</span>
+          <span class="kpi-icon">📚</span>
+        </div>
+        <div class="kpi-value" id="kpiBooksCount">--</div>
+        <div class="kpi-footer">
+          <span>Endpoint: <code>GET /products</code></span>
+          <span style="color:#10b981;">● Online</span>
+        </div>
+      </div>
+
+      <!-- KPI 2: Clientes -->
+      <div class="kpi-card" onclick="window.location.href='pages/03_clientes.html'">
+        <div class="kpi-header">
+          <span class="kpi-title">Clientes Cadastrados</span>
+          <span class="kpi-icon">👥</span>
+        </div>
+        <div class="kpi-value" id="kpiClientsCount">--</div>
+        <div class="kpi-footer">
+          <span>Endpoint: <code>GET /clients</code></span>
+          <span style="color:#38bdf8;">● Ativos</span>
+        </div>
+      </div>
+
+      <!-- KPI 3: Vendas -->
+      <div class="kpi-card" onclick="window.location.href='pages/04_vendas.html'">
+        <div class="kpi-header">
+          <span class="kpi-title">Vendas Realizadas</span>
+          <span class="kpi-icon">🛒</span>
+        </div>
+        <div class="kpi-value" id="kpiSalesCount">--</div>
+        <div class="kpi-footer">
+          <span>Endpoint: <code>POST /sales</code></span>
+          <span style="color:#f59e0b;">● Auditadas</span>
+        </div>
+      </div>
+
+      <!-- KPI 4: Rate Limit -->
+      <div class="kpi-card" onclick="window.location.href='pages/06_painel_tecnico.html'">
+        <div class="kpi-header">
+          <span class="kpi-title">Rate Limit (Token Bucket)</span>
+          <span class="kpi-icon">⚡</span>
+        </div>
+        <div class="kpi-value" id="kpiRateLimitRemaining" style="color:#10b981;">--/100</div>
+        <div class="kpi-footer">
+          <span>Reset em: <strong id="kpiRateLimitReset">--</strong></span>
+          <span style="color:#38bdf8;">IETF Draft 07</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================================
+         GRID DE MÓDULOS DE NAVEGAÇÃO
+         ====================================================================== -->
+    <div style="margin-top:28px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:1.25rem; color:#f8fafc; font-weight:700;">
+        🚀 Módulos da Apresentação Acadêmica
+      </h3>
+      <span style="font-size:0.85rem; color:var(--text-muted);">
+        Clique no módulo para navegar de forma contínua
+      </span>
+    </div>
+
+    <div class="modules-grid">
+      <!-- Módulo 1: Produtos & Estoque -->
+      <div class="module-card" onclick="window.location.href='pages/02_produtos.html'">
+        <div class="module-header">
+          <span class="module-icon">📖</span>
+          <span class="module-tag" style="background:#065f46; color:#a7f3d0; border:1px solid #059669;">✅ Homologado</span>
+        </div>
+        <div class="module-title">Produtos & Controle de Estoque</div>
+        <div class="module-desc">
+          Catálogo completo com busca textual, paginação, filtro em estoque, atualização atômica de preço/estoque com <code>If-Match</code>, validação RFC 9457 e teste de integridade referencial.
+        </div>
+        <div class="module-endpoints">
+          <code>GET /products</code> &bull; <code>PATCH /products/{id}</code> &bull; <code>DELETE /products/{id}</code>
+        </div>
+      </div>
+
+      <!-- Módulo 2: Clientes -->
+      <div class="module-card" onclick="window.location.href='pages/03_clientes.html'">
+        <div class="module-header">
+          <span class="module-icon">👥</span>
+          <span class="module-tag" style="background:#065f46; color:#a7f3d0; border:1px solid #059669;">✅ Homologado</span>
+        </div>
+        <div class="module-title">Clientes & Fidelidade</div>
+        <div class="module-desc">
+          Cadastro de clientes, validação estrita de CPF/telefone, busca por nome e cálculo de pontuação acumulada do programa fidelidade.
+        </div>
+        <div class="module-endpoints">
+          <code>GET /clients</code> &bull; <code>POST /clients</code> &bull; <code>GET /clients/{id}</code>
+        </div>
+      </div>
+
+      <!-- Módulo 3: Nova Venda -->
+      <div class="module-card" onclick="window.location.href='pages/04_vendas.html'">
+        <div class="module-header">
+          <span class="module-icon">🛒</span>
+          <span class="module-tag" style="background:#065f46; color:#a7f3d0; border:1px solid #059669;">✅ Homologado</span>
+        </div>
+        <div class="module-title">Nova Venda (PDV / Checkout)</div>
+        <div class="module-desc">
+          Seleção do operador, adição de múltiplos itens ao carrinho, validação atômica de saldo em estoque e transação em lote.
+        </div>
+        <div class="module-endpoints">
+          <code>POST /api/v1/sales</code> (Atomic Transaction)
+        </div>
+      </div>
+
+      <!-- Módulo 4: Histórico -->
+      <div class="module-card" onclick="window.location.href='pages/05_historico.html'">
+        <div class="module-header">
+          <span class="module-icon">📋</span>
+          <span class="module-tag" style="background:#065f46; color:#a7f3d0; border:1px solid #059669;">✅ Homologado</span>
+        </div>
+        <div class="module-title">Histórico de Compras do Cliente</div>
+        <div class="module-desc">
+          Auditoria completa de vendas com snapshots imutáveis de itens/preços, validação de cache HTTP 304 (ETag), paginação e rastreabilidade total por operador.
+        </div>
+        <div class="module-endpoints">
+          <code>GET /api/v1/clients/{clientId}/sales</code>
+        </div>
+      </div>
+
+      <!-- Módulo 5: Painel Técnico -->
+      <div class="module-card" onclick="window.location.href='pages/06_painel_tecnico.html'" style="border-left:4px solid #38bdf8;">
+        <div class="module-header">
+          <span class="module-icon">⚙️</span>
+          <span class="module-tag" style="background:#0c4a6e; color:#7dd3fc; border:1px solid #0284c7;">🔍 Inspeção Técnica</span>
+        </div>
+        <div class="module-title">Painel Técnico & Telemetria</div>
+        <div class="module-desc">
+          Inspeção ao vivo de claims JWT HS256, Refresh Token Rotation (RTR), rastreamento W3C Trace Context (<code>X-Request-Id</code>) e contratos RFC 9457.
+        </div>
+        <div class="module-endpoints">
+          <code>RFC 9457</code> &bull; <code>ETag</code> &bull; <code>If-Match</code> &bull; <code>X-Request-Id</code>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================================
+         PILARE ARQUITETURAIS DA API (PARA DEFESA ACADÊMICA)
+         ====================================================================== -->
+    <div style="margin-top:34px; margin-bottom:14px;">
+      <h3 style="font-size:1.25rem; color:#f8fafc; font-weight:700;">
+        🏛️ Pilares de Engenharia e Diferenciais da Bookstore API
+      </h3>
+    </div>
+
+    <div class="pillars-grid">
+      <div class="pillar-card">
+        <div class="pillar-title">🔐 Segurança & Autenticação Robusta</div>
+        <p class="pillar-text">
+          Tokens de acesso JWT (HS256) com tempo de vida curto (15 min) e Refresh Tokens de uso único (14 dias) com revogação automática da família inteira em caso de reuso indevido.
+        </p>
+      </div>
+
+      <div class="pillar-card">
+        <div class="pillar-title">⚡ Cache HTTP e Concorrência Otimista</div>
+        <p class="pillar-text">
+          Uso rigoroso de <code>ETag</code> e <code>If-None-Match</code> com retorno <code>304 Not Modified</code> para economia de banda, e <code>If-Match</code> com retorno <code>412 Precondition Failed</code> evitando perda de atualizações.
+        </p>
+      </div>
+
+      <div class="pillar-card">
+        <div class="pillar-title">🚨 Respostas de Erro RFC 9457</div>
+        <p class="pillar-text">
+          Todas as falhas retornam <code>application/problem+json</code> com campos canônicos: <code>type</code>, <code>title</code>, <code>status</code>, <code>detail</code>, <code>instance</code>, <code>code</code> e rastreamento <code>X-Request-Id</code>.
+        </p>
+      </div>
+
+      <div class="pillar-card">
+        <div class="pillar-title">🛡️ Controle de Taxa (Token Bucket)</div>
+        <p class="pillar-text">
+          Rate limiting configurado em memória por IP/chave, aplicando custo diferenciado para endpoints críticos e retornando headers IETF (<code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code>, <code>RateLimit-Reset</code>).
+        </p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Rodapé Institucional -->
+  <footer>
+    <div>
+      <strong>Bookstore API &bull; Apresentação P2:</strong> <code>Spec-Driven Development (SDD)</code> | <code>FastAPI + SQLite</code>
+    </div>
+    <div>
+      Apresentadora: <strong>Roberta Souza</strong> &bull; Engenharia de Software
+    </div>
+  </footer>
+
+  <!-- Scripts Modulares Compartilhados -->
+  <script src="components/session.js"></script>
+  <script src="components/api.js"></script>
+  <script src="components/navbar.js"></script>
+  <script>
+    // Validação estrita de autenticação ao carregar o Hub
+    if (!Session.requireAuth('pages/01_login.html')) {
+      // Redirecionamento em curso
+    } else {
+      // Injeta TopBar compartilhada
+      Navbar.render({
+        targetElementId: 'navbarContainer',
+        homeUrl: 'index.html',
+        loginUrl: 'pages/01_login.html'
+      });
+
+      // Carrega informações do usuário autenticado
+      const user = Session.getUser() || {
+        name: 'Operador Autenticado',
+        email: 'usuario@api.com',
+        role: Session.getRole(),
+        id: 'USR123'
+      };
+      const role = Session.getRole();
+
+      document.getElementById('welcomeGreeting').textContent = `Bem-vindo(a), ${user.name.split(' ')[0]}!`;
+      document.getElementById('welcomeUserName').textContent = user.name;
+      document.getElementById('welcomeUserEmail').textContent = user.email;
+      document.getElementById('welcomeUserId').textContent = user.id;
+
+      // Renderiza Badge de Perfil no Banner
+      const badgeBox = document.getElementById('welcomeBadgeContainer');
+      const rbacText = document.getElementById('rbacNoticeText');
+
+      if (role === 'ADMIN') {
+        badgeBox.innerHTML = `
+          <div style="background:#064e3b; border:1px solid #059669; padding:8px 16px; border-radius:8px; text-align:center;">
+            <div style="font-size:1.1rem; font-weight:800; color:#34d399;">🛡️ PERFIL ADMIN</div>
+            <div style="font-size:0.75rem; color:#a7f3d0; margin-top:2px;">Acesso Irrestrito / Escrita Total</div>
+          </div>
+        `;
+        rbacText.innerHTML = `
+          <strong>Modo Administrador Ativo:</strong> Você possui privilégios totais para criar, editar preços, atualizar estoque e excluir registros na Bookstore API.
+        `;
+      } else {
+        badgeBox.innerHTML = `
+          <div style="background:#1e3a8a; border:1px solid #2563eb; padding:8px 16px; border-radius:8px; text-align:center;">
+            <div style="font-size:1.1rem; font-weight:800; color:#93c5fd;">💼 PERFIL SELLER</div>
+            <div style="font-size:0.75rem; color:#bfdbfe; margin-top:2px;">Operador de Vendas / Leitura</div>
+          </div>
+        `;
+        rbacText.innerHTML = `
+          <strong>Modo Vendedor (SELLER) Ativo:</strong> Você pode consultar livros, clientes e realizar vendas. Ações de edição cadastral e exclusão de produtos serão restritas (HTTP 403 Forbidden).
+        `;
+      }
+
+      // Atualiza KPIs com dados da base / mock engine
+      Api.getDashboardStats().then(stats => {
+        if (stats) {
+          document.getElementById('kpiBooksCount').textContent = stats.booksCount;
+          document.getElementById('kpiClientsCount').textContent = stats.clientsCount;
+          document.getElementById('kpiSalesCount').textContent = stats.salesCount;
+          document.getElementById('kpiRateLimitRemaining').textContent = stats.rateLimitRemaining;
+          document.getElementById('kpiRateLimitReset').textContent = stats.rateLimitReset;
+        }
+      });
+    }
+  </script>
+</body>
+</html>

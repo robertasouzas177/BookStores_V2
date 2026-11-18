@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
@@ -347,4 +348,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
         instance=request.url.path,
         code=code,
         headers=exc.headers,
+    )
+
+
+async def integrity_exception_handler(request: Request, exc: IntegrityError) -> JSONResponse:
+    """Trata violações de chave estrangeira RESTRICT e integridade relacional, convertendo para 409 Conflict RFC 9457."""
+    return create_problem_details(
+        status_code=409,
+        title="Recurso em Uso",
+        detail="A operação não pode ser concluída porque o registro possui vendas ou vínculos dependentes no histórico.",
+        type_uri="https://api.bookstore.dev/errors/resource-in-use",
+        instance=request.url.path,
+        code="RESOURCE_IN_USE",
     )

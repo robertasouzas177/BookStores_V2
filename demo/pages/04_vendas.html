@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tela 4: Nova Venda (PDV) — Bookstore API (P2)</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+
+  <!-- TopBar Injetada via Navbar Component -->
+  <header class="topbar" id="navbarContainer"></header>
+
+  <main class="main-wrapper">
+
+    <!-- Header da Tela com Navegação Contínua -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2 class="card-title" style="font-size:1.6rem; color:#38bdf8;">🛒 Módulo 3: Nova Venda (PDV / Checkout Transacional)</h2>
+        <p style="color:var(--text-muted); font-size:0.88rem;">
+          Endpoints: <code>POST /api/v1/sales</code> &bull; <code>Idempotency-Key</code> &bull; Transação Atômica &bull; Snapshot de Preços &bull; RFC 9457
+        </p>
+      </div>
+      <button class="btn-back-dashboard" onclick="window.location.href='../index.html'">
+        &larr; Voltar ao Dashboard
+      </button>
+    </div>
+
+    <!-- BLOCO 2 — VENDEDOR & OPERADOR (Identity via JWT) -->
+    <div class="alert alert-info" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:1.4rem;">🛡️</span>
+        <div>
+          <div style="font-size:0.85rem; color:#f8fafc; font-weight:700;">
+            Vendedor Responsável (Identidade extraída do JWT):
+          </div>
+          <div style="font-size:0.8rem; color:#93c5fd;">
+            Operador: <strong id="operatorNameLabel">—</strong> &bull; Perfil: <span id="operatorRoleBadge" class="role-badge seller" style="padding:2px 6px; font-size:0.7rem;">SELLER</span>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:0.8rem; color:var(--text-muted); text-align:right;">
+        <div>sellerId (sub): <code id="operatorSellerId" style="color:#38bdf8; font-weight:700;">—</code></div>
+        <div style="font-size:0.72rem; color:#a7f3d0;">🔒 Imutável: Não pode ser editado nem digitado manualmente.</div>
+      </div>
+    </div>
+
+    <!-- Presets de Demonstração Rápida para a Banca (P2) -->
+    <div class="presets-box" style="margin-bottom:18px;">
+      <div class="presets-label">⚡ Demonstrações Obrigatórias para a Banca (Clique para executar em 1 clique):</div>
+      <div class="presets-grid">
+        <button type="button" class="btn-preset" onclick="quickDemoSale('valid_sale')" style="border-left:4px solid #10b981;" title="Venda padrão de 2 itens">
+          🛒 1. Venda Padrão (2 Livros)
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoSale('discount_sale')" style="border-left:4px solid #eab308;" title="Venda com desconto de fidelidade de 10%">
+          🏆 2. Venda c/ Desconto 10% (100 Pts)
+        </button>
+        <button type="button" class="btn-preset" onclick="quickDemoSale('test_idempotency')" style="border-left:4px solid #38bdf8;" title="Reenviar com a mesma Idempotency-Key">
+          🔄 3. Idempotência (Replay)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoSale('error_stock')" style="border-left:4px solid #ef4444;" title="Pedir 50 un de livro com estoque 5">
+          🚫 4. Estoque Insuficiente (409)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoSale('error_no_client')" style="border-left:4px solid #ec4899;" title="POST sem cliente">
+          ❌ 5. Venda sem Cliente (422)
+        </button>
+        <button type="button" class="btn-preset error" onclick="quickDemoSale('error_empty_cart')" style="border-left:4px solid #f97316;" title="POST sem itens">
+          📦 6. Carrinho Vazio (422)
+        </button>
+      </div>
+    </div>
+
+    <!-- LAYOUT PRINCIPAL DO PDV (2 COLUNAS) -->
+    <div style="display:grid; grid-template-columns:1.4fr 1fr; gap:20px; align-items:start;">
+
+      <!-- ====================================================================
+           COLUNA ESQUERDA: CLIENTE, CATÁLOGO E CARRINHO
+           ==================================================================== -->
+      <div style="display:flex; flex-direction:column; gap:18px;">
+
+        <!-- BLOCO 1: CLIENTE SELECIONADO -->
+        <div class="card" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:1.2rem;">👤</span>
+              <h3 style="font-size:1rem; color:#f8fafc; font-weight:700;">Cliente do Atendimento</h3>
+            </div>
+            <button type="button" class="btn-page" style="padding:4px 10px; font-size:0.75rem;" onclick="openClientSelectionModal()">
+              🔍 Alterar / Buscar Cliente
+            </button>
+          </div>
+
+          <div id="clientSelectedDisplay" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <div id="saleClientName" style="font-size:1.1rem; font-weight:800; color:#38bdf8;">Ana Souza</div>
+              <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">
+                CPF: <code id="saleClientCpf" style="color:#cbd5e1;">529.982.247-25</code> &bull; ID: <code id="saleClientId" style="color:#94a3b8;">8NV1c7Q4TCYGcsuPch8I</code>
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Saldo Fidelidade:</div>
+              <div style="display:flex; align-items:center; gap:6px; justify-content:flex-end;">
+                <span id="saleClientPointsBadge" style="font-size:1.3rem; font-weight:900; color:#f59e0b;">100 pts</span>
+                <span id="saleClientTierTag" class="tier-badge gold">🥇 VIP</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="noClientAlert" class="hidden" style="background:#450a0a; border:1px solid #7f1d1d; padding:10px; border-radius:6px; color:#fca5a5; font-size:0.85rem; margin-top:10px;">
+            ⚠️ Nenhum cliente selecionado. Selecione um cliente para registrar a venda e pontuar a fidelidade.
+          </div>
+        </div>
+
+        <!-- BLOCO 3: CATÁLOGO RÁPIDO DE LIVROS DISPONÍVEIS -->
+        <div class="card" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:1.2rem;">📖</span>
+              <h3 style="font-size:1rem; color:#f8fafc; font-weight:700;">Catálogo Rápido (Adicionar ao Pedido)</h3>
+            </div>
+            <input
+              type="text"
+              id="catalogQuickSearch"
+              class="form-control"
+              placeholder="Filtrar livros..."
+              style="padding:4px 8px; font-size:0.8rem; width:170px;"
+              oninput="filterCatalogDisplay()"
+            />
+          </div>
+
+          <div id="catalogListContainer" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; max-height:220px; overflow-y:auto; padding-right:4px;">
+            <!-- Livros injetados via JS -->
+          </div>
+        </div>
+
+        <!-- BLOCO 4: CARRINHO DE ITENS (Tabela) -->
+        <div class="card" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:1.2rem;">🛍️</span>
+              <h3 style="font-size:1rem; color:#f8fafc; font-weight:700;">Itens da Venda (Carrinho)</h3>
+            </div>
+            <span id="cartCountBadge" class="stock-badge high" style="padding:2px 8px; font-size:0.75rem;">0 itens</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Livro</th>
+                  <th style="width:90px;">Preço Unit.</th>
+                  <th style="width:110px; text-align:center;">Quantidade</th>
+                  <th style="width:95px; text-align:right;">Subtotal</th>
+                  <th style="width:50px; text-align:center;">Ação</th>
+                </tr>
+              </thead>
+              <tbody id="cartTableBody">
+                <tr>
+                  <td colspan="5" style="text-align:center; padding:22px; color:var(--text-muted);">
+                    Carrinho vazio. Adicione livros do catálogo acima para compor a venda.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ====================================================================
+           COLUNA DIREITA: FIDELIDADE, RESUMO FINANCEIRO E FINALIZAÇÃO
+           ==================================================================== -->
+      <div style="display:flex; flex-direction:column; gap:18px;">
+
+        <!-- BLOCO 5: PAINEL DE FIDELIDADE (Cálculo e Desconto) -->
+        <div class="card" style="padding:16px; border-left:4px solid #f59e0b;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="font-size:1rem; color:#f8fafc; font-weight:700; display:flex; align-items:center; gap:6px;">
+              <span>🏆 Programa Fidelidade</span>
+            </h3>
+            <span id="loyaltyStatusTag" class="tier-badge gold">100 Pts</span>
+          </div>
+
+          <!-- Switch para aplicar o cupom de 10% -->
+          <div style="background:#0f172a; border:1px solid #334155; border-radius:6px; padding:10px; margin-bottom:12px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="checkApplyDiscount" style="width:18px; height:18px; cursor:pointer;" onchange="recalculateTotals()" />
+              <label for="checkApplyDiscount" style="font-size:0.85rem; font-weight:700; color:#f8fafc; cursor:pointer;">
+                Resgatar Desconto de 10% (100 Pts)
+              </label>
+            </div>
+            <div id="loyaltyRuleExplanation" style="font-size:0.75rem; color:#cbd5e1; margin-top:4px;">
+              Cliente possui 100 pontos e tem direito a 10% de abatimento sobre o total bruto.
+            </div>
+          </div>
+
+          <!-- Breakdown de Pontuação -->
+          <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.6; background:#030712; padding:8px 10px; border-radius:4px; border:1px solid #1e293b;">
+            <div style="display:flex; justify-content:space-between;">
+              <span>Saldo Antes da Venda:</span>
+              <strong id="pointsBeforeLabel" style="color:#f8fafc;">100 pts</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+              <span>Pontos a Utilizar (-):</span>
+              <strong id="pointsUsedLabel" style="color:#f87171;">0 pts</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+              <span>Pontos Gerados (+1 a cada R$ 10):</span>
+              <strong id="pointsEarnedLabel" style="color:#10b981;">+0 pts</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-top:1px solid #334155; margin-top:4px; padding-top:4px;">
+              <span style="font-weight:700; color:#f8fafc;">Saldo Previsto Após Venda:</span>
+              <strong id="pointsAfterLabel" style="color:#38bdf8;">100 pts</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- BLOCO 6: RESUMO FINANCEIRO (Atualizado em Tempo Real) -->
+        <div class="card" style="padding:18px; border:2px solid var(--border-color);">
+          <h3 style="font-size:1.1rem; color:#f8fafc; font-weight:800; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+            💳 Resumo Financeiro do Pedido
+          </h3>
+
+          <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; font-size:0.95rem;">
+              <span style="color:var(--text-muted);">Total Bruto (grossTotal):</span>
+              <strong id="grossTotalDisplay" style="color:#f8fafc; font-size:1.1rem;">R$ 0,00</strong>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; font-size:0.95rem;">
+              <span style="color:#f59e0b;">Desconto Fidelidade (discount):</span>
+              <strong id="discountDisplay" style="color:#f59e0b; font-size:1.1rem;">- R$ 0,00</strong>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:baseline; border-top:2px solid #334155; padding-top:10px; margin-top:4px;">
+              <span style="font-size:1.1rem; font-weight:800; color:#f8fafc;">TOTAL LÍQUIDO (finalTotal):</span>
+              <strong id="finalTotalDisplay" style="color:#10b981; font-size:1.6rem; font-weight:900;">R$ 0,00</strong>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:16px;">
+            <label for="paymentMethodSelect" class="form-label" style="font-size:0.8rem;">Forma de Pagamento (OpenAPI):</label>
+            <select id="paymentMethodSelect" class="form-control" style="font-size:0.85rem;">
+              <option value="Dinheiro" selected>Dinheiro</option>
+              <option value="Cartão de Débito">Cartão de Débito</option>
+              <option value="Cartão de Crédito">Cartão de Crédito</option>
+              <option value="PIX">PIX</option>
+            </select>
+          </div>
+
+          <!-- BLOCO 7: BOTÃO DE REGISTRO E IDEMPOTÊNCIA -->
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <button
+              type="button"
+              id="btnSubmitSale"
+              class="btn-submit"
+              style="padding:14px; font-size:1rem; font-weight:800; background:#059669;"
+              onclick="handleSubmitSale()"
+            >
+              ⚡ FINALIZAR VENDA (POST /api/v1/sales)
+            </button>
+
+            <button
+              type="button"
+              id="btnReplayIdempotency"
+              class="btn-page"
+              style="padding:9px; font-size:0.8rem; border-color:#38bdf8; color:#38bdf8;"
+              onclick="handleReplaySameIdempotencyKey()"
+              disabled
+              title="Disponível após registrar a primeira venda"
+            >
+              🔄 Reenviar Mesma Requisição (Testar Idempotency-Replayed)
+            </button>
+
+            <button
+              type="button"
+              class="btn-page"
+              style="padding:8px; font-size:0.8rem;"
+              onclick="clearCart()"
+            >
+              🧹 Limpar Carrinho
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================================================
+         QUADRO COMPARATIVO: ANTES DA VENDA vs DEPOIS DA TRANSAÇÃO
+         ======================================================================== -->
+    <div class="card" style="margin-top:24px; padding:18px;">
+      <h3 style="font-size:1.1rem; color:#f8fafc; font-weight:800; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+        <span>📊 Quadro de Auditoria Transacional (Antes vs Depois)</span>
+      </h3>
+      <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:14px;">
+        Demonstração em tempo real da baixa atômica de estoque dos livros e evolução do saldo de fidelidade do cliente:
+      </p>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <!-- Card Antes -->
+        <div style="background:#0f172a; border:1px solid #334155; border-radius:6px; padding:14px;">
+          <div style="font-size:0.85rem; font-weight:800; color:#94a3b8; text-transform:uppercase; margin-bottom:8px;">
+            Estado ANTES da Transação:
+          </div>
+          <div id="auditBeforeContent" style="font-size:0.82rem; color:#cbd5e1; line-height:1.7;">
+            Selecione itens e finalize a venda para auditar os valores.
+          </div>
+        </div>
+
+        <!-- Card Depois -->
+        <div style="background:#064e3b; border:1px solid #059669; border-radius:6px; padding:14px;">
+          <div style="font-size:0.85rem; font-weight:800; color:#6ee7b7; text-transform:uppercase; margin-bottom:8px;">
+            Estado DEPOIS da Transação (Confirmado):
+          </div>
+          <div id="auditAfterContent" style="font-size:0.82rem; color:#d1fae5; line-height:1.7;">
+            Aguardando submissão da venda...
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================================
+         PAINEL TÉCNICO OBRIGATÓRIO (OBSERVABILIDADE REST E IDEMPOTÊNCIA)
+         ======================================================================== -->
+    <div class="tech-panel" style="margin-top:24px;">
+      <div class="tech-panel-header">
+        <h3 style="font-size:1.05rem; color:#f1f5f9;">⚙️ Painel Técnico & Telemetria Transacional (PDV)</h3>
+        <span id="saleTechStatusBadge" class="role-badge" style="background:#064e3b; border-color:#059669; color:#6ee7b7;">200 OK</span>
+      </div>
+
+      <div class="tech-grid">
+        <!-- 1. Status HTTP -->
+        <div class="tech-box">
+          <div class="tech-box-title">Status da Resposta</div>
+          <div id="saleTechHttpStatus" style="font-size:1.25rem; font-weight:800; color:#10b981;">HTTP 200 OK</div>
+          <div id="saleTechStatusDetail" style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">PDV pronto para operações.</div>
+        </div>
+
+        <!-- 2. Idempotency-Key -->
+        <div class="tech-box">
+          <div class="tech-box-title">Idempotency-Key Gerada</div>
+          <div id="saleTechIdempotencyKey" class="tech-box-code" style="color:#38bdf8;">idem_init</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Chave única enviada no header <code>Idempotency-Key</code>.</div>
+        </div>
+
+        <!-- 3. Idempotency-Replayed Header -->
+        <div class="tech-box">
+          <div class="tech-box-title">Idempotency-Replayed</div>
+          <div id="saleTechReplayedDisplay" style="font-size:1.15rem; font-weight:800; color:#10b981;">false (Venda Nova)</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Indica se a requisição foi reexecutada do cache.</div>
+        </div>
+
+        <!-- 4. X-Request-Id -->
+        <div class="tech-box">
+          <div class="tech-box-title">X-Request-Id (Trace Context)</div>
+          <div id="saleTechRequestId" class="tech-box-code" style="color:#93c5fd;">8NV1c7Q4TCYGcsuPch8I</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Rastreabilidade W3C ponta a ponta.</div>
+        </div>
+
+        <!-- 5. RFC 9457 Code -->
+        <div class="tech-box">
+          <div class="tech-box-title">Código RFC 9457</div>
+          <div id="saleTechRfcCode" style="font-family:var(--font-mono); font-size:1.15rem; font-weight:700; color:#38bdf8;">NENHUM ERRO</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Código de erro padronizado para máquinas.</div>
+        </div>
+
+        <!-- 6. Tempo de Resposta -->
+        <div class="tech-box">
+          <div class="tech-box-title">Tempo de Resposta</div>
+          <div id="saleTechResponseTime" style="font-family:var(--font-mono); font-size:1.15rem; font-weight:700; color:#f8fafc;">32 ms</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Latência de ida e volta da transação.</div>
+        </div>
+      </div>
+
+      <!-- Alerta Explicativo de Replay de Idempotência -->
+      <div id="saleReplayExplanationBox" class="alert alert-info hidden" style="margin-top:14px; background:#1e3a8a; border-color:#3b82f6;">
+        <span class="alert-icon">🛡️</span>
+        <div style="font-size:0.84rem;">
+          <strong>Idempotência Validada com Sucesso (Idempotency-Replayed: true):</strong> O servidor identificou que esta mesma chave já foi processada anteriormente. O registro original foi devolvido intacto. <strong>O estoque não foi baixado novamente</strong> e <strong>os pontos do cliente não foram duplicados</strong>.
+        </div>
+      </div>
+
+      <!-- Box de Exibição de Resposta RFC 9457 em caso de erro -->
+      <div id="saleRfcErrorBox" class="rfc-box hidden" style="margin-top:16px;">
+        <div class="rfc-box-header">
+          <span class="rfc-box-title">🚨 Resposta RFC 9457 (Problem Details: application/problem+json)</span>
+          <span id="saleRfcStatusTag" class="role-badge" style="background:#7f1d1d; border-color:#dc2626; color:#fca5a5;">409 CONFLICT</span>
+        </div>
+        <pre id="saleRfcErrorJson" class="rfc-json-content"></pre>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================
+       MODAL 1: RECIBO DA VENDA REGISTRADA COM SUCESSO (201 CREATED)
+       ======================================================================== -->
+  <div id="saleReceiptModal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width:560px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+        <h3 style="font-size:1.2rem; color:#10b981; display:flex; align-items:center; gap:6px;">
+          <span>✅ Venda Registrada com Sucesso!</span>
+        </h3>
+        <button type="button" class="btn-toggle-pass" onclick="closeReceiptModal()">✕</button>
+      </div>
+
+      <div style="background:#030712; padding:12px; border-radius:6px; border:1px solid #1e293b; margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:0.8rem; color:var(--text-muted);">
+          <span>ID DA VENDA:</span>
+          <code id="receiptSaleId" style="color:#38bdf8; font-weight:700;">SAL...</code>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:0.8rem; color:var(--text-muted);">
+          <span>LOCATION HEADER:</span>
+          <code id="receiptLocation" style="color:#cbd5e1;">/api/v1/sales/...</code>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:var(--text-muted);">
+          <span>DATA / HORA:</span>
+          <span id="receiptDate" style="color:#f8fafc;">—</span>
+        </div>
+      </div>
+
+      <div style="font-size:0.85rem; margin-bottom:12px;">
+        <div>Cliente: <strong id="receiptClientName" style="color:#f8fafc;">—</strong></div>
+        <div style="color:var(--text-muted); font-size:0.8rem;">Vendedor (JWT): <span id="receiptSellerName">—</span></div>
+      </div>
+
+      <div style="max-height:140px; overflow-y:auto; margin-bottom:14px; border:1px solid #1e293b; border-radius:4px;">
+        <table class="data-table" style="font-size:0.8rem;">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th style="width:50px; text-align:center;">Qtd</th>
+              <th style="width:80px; text-align:right;">Unit.</th>
+              <th style="width:80px; text-align:right;">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody id="receiptItemsBody"></tbody>
+        </table>
+      </div>
+
+      <div style="background:#0f172a; padding:10px; border-radius:6px; margin-bottom:16px; font-size:0.88rem;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span style="color:var(--text-muted);">Total Bruto:</span>
+          <span id="receiptGrossTotal">R$ 0,00</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:#f59e0b;">
+          <span>Desconto Fidelidade:</span>
+          <span id="receiptDiscount">- R$ 0,00</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:1.1rem; font-weight:800; border-top:1px solid #334155; padding-top:6px; margin-top:4px;">
+          <span style="color:#f8fafc;">VALOR PAGO:</span>
+          <span id="receiptFinalTotal" style="color:#10b981;">R$ 0,00</span>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; gap:10px;">
+        <button type="button" class="btn-page" style="flex:1;" onclick="goToClientHistory()">
+          🧾 Ver no Histórico de Compras &rarr;
+        </button>
+        <button type="button" class="btn-submit" style="flex:1;" onclick="closeReceiptModal(); resetSaleForm();">
+          🛒 Nova Venda
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       MODAL 2: SELEÇÃO RÁPIDA DE CLIENTE (GET /api/v1/clients)
+       ======================================================================== -->
+  <div id="selectClientModal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width:540px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+        <h3 style="font-size:1.15rem; color:#f8fafc;">Selecionar Cliente para o PDV</h3>
+        <button type="button" class="btn-toggle-pass" onclick="closeClientSelectionModal()">✕</button>
+      </div>
+
+      <div class="form-group" style="margin-bottom:12px;">
+        <input
+          type="text"
+          id="clientSearchModalInput"
+          class="form-control"
+          placeholder="Buscar por nome ou CPF..."
+          oninput="searchClientsForModal()"
+        />
+      </div>
+
+      <div id="clientSearchResultsContainer" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+        <!-- Lista de clientes injetada via JS -->
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div>
+      <strong>Bookstore API &bull; P2:</strong> <code>POST /sales</code> | <code>Idempotency-Key</code> | <code>Fidelidade</code> | <code>RFC 9457</code>
+    </div>
+    <div>
+      Apresentadora: <strong>Roberta Souza</strong> &bull; Engenharia de Software
+    </div>
+  </footer>
+
+  <script src="../components/session.js"></script>
+  <script src="../components/api.js"></script>
+  <script src="../components/navbar.js"></script>
+  <script>
+    // 1. Validação de Sessão obrigatória
+    Session.requireAuth('01_login.html');
+
+    Navbar.render({
+      targetElementId: 'navbarContainer',
+      homeUrl: '../index.html',
+      loginUrl: '01_login.html'
+    });
+
+    // 2. Estado Global do PDV
+    const pdvState = {
+      client: null,
+      catalog: [],
+      cart: [], // { productId, title, price, stock, quantity }
+      currentIdempotencyKey: generateIdempotencyKey(),
+      lastExecutionPayload: null,
+      lastCreatedSale: null
+    };
+
+    function generateIdempotencyKey() {
+      return 'idem_' + Math.random().toString(36).substring(2, 10) + '-' + Math.random().toString(36).substring(2, 10);
+    }
+
+    function formatCpf(cpf) {
+      if (!cpf) return '—';
+      const clean = String(cpf).replace(/\D/g, '');
+      if (clean.length === 11) {
+        return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+      }
+      return cpf;
+    }
+
+    // 3. Inicialização do Vendedor via JWT
+    function initSellerFromSession() {
+      const user = Session.getUser() || {
+        id: "VND1c7Q4TCYGcsuPch99",
+        name: "Vendedor Operacional",
+        role: Session.getRole()
+      };
+      const role = Session.getRole();
+
+      document.getElementById('operatorNameLabel').textContent = user.name;
+      document.getElementById('operatorSellerId').textContent = user.id;
+
+      const badge = document.getElementById('operatorRoleBadge');
+      badge.textContent = role;
+      badge.className = role === 'ADMIN' ? 'role-badge admin' : 'role-badge seller';
+    }
+
+    // 4. Inicialização do Cliente
+    async function initClient() {
+      const stored = Session.getSelectedClient();
+      if (stored) {
+        // Busca versão fresca do cliente na base
+        const res = await Api.getClientById(stored.id);
+        if (res.ok && res.data) {
+          setClient(res.data);
+        } else {
+          setClient(stored);
+        }
+      } else {
+        // Seleciona o cliente principal oficial da API
+        const res = await Api.getClients({ page: 1, limit: 1 });
+        const list = (res.data && Array.isArray(res.data.data)) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+        if (list.length > 0) {
+          setClient(list[0]);
+        }
+      }
+    }
+
+    function setClient(c) {
+      pdvState.client = c;
+      if (!c) {
+        document.getElementById('clientSelectedDisplay').classList.add('hidden');
+        document.getElementById('noClientAlert').classList.remove('hidden');
+        return;
+      }
+
+      document.getElementById('clientSelectedDisplay').classList.remove('hidden');
+      document.getElementById('noClientAlert').classList.add('hidden');
+
+      document.getElementById('saleClientName').textContent = c.name;
+      document.getElementById('saleClientCpf').textContent = formatCpf(c.cpf);
+      document.getElementById('saleClientId').textContent = c.id;
+      document.getElementById('saleClientPointsBadge').textContent = `${c.loyaltyPoints} pts`;
+
+      const tierTag = document.getElementById('saleClientTierTag');
+      if (c.loyaltyPoints >= 100) {
+        tierTag.className = 'tier-badge gold';
+        tierTag.textContent = '🥇 Ouro (100+)';
+      } else if (c.loyaltyPoints >= 50) {
+        tierTag.className = 'tier-badge silver';
+        tierTag.textContent = '🥈 Prata (50-99)';
+      } else {
+        tierTag.className = 'tier-badge bronze';
+        tierTag.textContent = '🥉 Bronze (0-49)';
+      }
+
+      // Configuração do Desconto de Fidelidade
+      const checkDiscount = document.getElementById('checkApplyDiscount');
+      const discountNotice = document.getElementById('loyaltyRuleExplanation');
+
+      if (c.loyaltyPoints >= 100) {
+        checkDiscount.disabled = false;
+        checkDiscount.checked = true; // Pré-ativado para cliente VIP
+        discountNotice.innerHTML = `Cliente possui <strong>${c.loyaltyPoints} pontos</strong> e tem direito a 10% de abatimento sobre o total bruto.`;
+      } else {
+        checkDiscount.disabled = true;
+        checkDiscount.checked = false;
+        discountNotice.innerHTML = `Saldo atual: <strong>${c.loyaltyPoints} pontos</strong>. Faltam <strong>${100 - c.loyaltyPoints} pontos</strong> para liberar o desconto de 10%.`;
+      }
+
+      recalculateTotals();
+    }
+
+    // 5. Carregamento do Catálogo de Produtos
+    async function loadCatalog() {
+      const res = await Api.getProducts({ page: 1, limit: 20 });
+      if (res.ok && res.data) {
+        const items = (res.data && Array.isArray(res.data.data)) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+        pdvState.catalog = items;
+        renderCatalog(items);
+      }
+    }
+
+    function renderCatalog(products) {
+      const container = document.getElementById('catalogListContainer');
+      container.innerHTML = '';
+
+      if (!products || products.length === 0) {
+        container.innerHTML = `<div style="grid-column:span 2; color:var(--text-muted); text-align:center; padding:12px;">Nenhum livro encontrado.</div>`;
+        return;
+      }
+
+      products.forEach(p => {
+        const div = document.createElement('div');
+        div.style.background = '#030712';
+        div.style.border = '1px solid #1e293b';
+        div.style.borderRadius = '6px';
+        div.style.padding = '8px 10px';
+        div.style.display = 'flex';
+        div.style.justifyContent = 'space-between';
+        div.style.alignItems = 'center';
+
+        const isOutOfStock = p.stock <= 0;
+
+        div.innerHTML = `
+          <div>
+            <div style="font-weight:700; font-size:0.85rem; color:#f8fafc;">${p.title}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">
+              R$ ${p.price},00 &bull; Estoque: <strong style="color:${isOutOfStock ? '#f87171' : '#10b981'};">${p.stock} un</strong>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="btn-page"
+            style="padding:4px 8px; font-size:0.75rem; background:${isOutOfStock ? '#1f2937' : '#0284c7'}; color:#ffffff; border:none;"
+            onclick="addToCart('${p.id}')"
+            ${isOutOfStock ? 'disabled' : ''}
+          >
+            ${isOutOfStock ? 'Esgotado' : '➕ Adicionar'}
+          </button>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function filterCatalogDisplay() {
+      const q = document.getElementById('catalogQuickSearch').value.toLowerCase().trim();
+      const filtered = pdvState.catalog.filter(p =>
+        p.title.toLowerCase().includes(q) ||
+        p.author.toLowerCase().includes(q)
+      );
+      renderCatalog(filtered);
+    }
+
+    // 6. Manipulação do Carrinho
+    function addToCart(productId, quantity = 1) {
+      const prod = pdvState.catalog.find(p => p.id === productId);
+      if (!prod) return;
+
+      const existing = pdvState.cart.find(it => it.productId === productId);
+      if (existing) {
+        existing.quantity += quantity;
+      } else {
+        pdvState.cart.push({
+          productId: prod.id,
+          title: prod.title,
+          price: prod.price,
+          stock: prod.stock,
+          quantity: quantity
+        });
+      }
+
+      renderCart();
+      recalculateTotals();
+    }
+
+    function updateCartQuantity(productId, delta) {
+      const it = pdvState.cart.find(item => item.productId === productId);
+      if (!it) return;
+
+      it.quantity += delta;
+      if (it.quantity <= 0) {
+        removeFromCart(productId);
+      } else {
+        renderCart();
+        recalculateTotals();
+      }
+    }
+
+    function removeFromCart(productId) {
+      pdvState.cart = pdvState.cart.filter(item => item.productId !== productId);
+      renderCart();
+      recalculateTotals();
+    }
+
+    function clearCart() {
+      pdvState.cart = [];
+      renderCart();
+      recalculateTotals();
+    }
+
+    function renderCart() {
+      const tbody = document.getElementById('cartTableBody');
+      const countBadge = document.getElementById('cartCountBadge');
+      tbody.innerHTML = '';
+
+      const totalItemsCount = pdvState.cart.reduce((acc, it) => acc + it.quantity, 0);
+      countBadge.textContent = `${totalItemsCount} ${totalItemsCount === 1 ? 'item' : 'itens'}`;
+
+      if (pdvState.cart.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align:center; padding:22px; color:var(--text-muted);">
+              Carrinho vazio. Adicione livros do catálogo acima para compor a venda.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      pdvState.cart.forEach(it => {
+        const subtotal = it.quantity * it.price;
+        const isExceeded = it.quantity > it.stock;
+
+        const tr = document.createElement('tr');
+        if (isExceeded) {
+          tr.style.background = '#450a0a';
+        }
+
+        tr.innerHTML = `
+          <td>
+            <div style="font-weight:700; color:#f8fafc; font-size:0.85rem;">${it.title}</div>
+            <div style="font-size:0.75rem; color:${isExceeded ? '#fca5a5' : 'var(--text-muted)'};">
+              Estoque disponível: ${it.stock} un ${isExceeded ? '⚠️ <strong>(Excedido!)</strong>' : ''}
+            </div>
+          </td>
+          <td>R$ ${it.price},00</td>
+          <td style="text-align:center;">
+            <div style="display:inline-flex; align-items:center; gap:4px;">
+              <button type="button" class="btn-page" style="padding:2px 6px; font-size:0.75rem;" onclick="updateCartQuantity('${it.productId}', -1)">-</button>
+              <span style="font-weight:700; min-width:20px; text-align:center;">${it.quantity}</span>
+              <button type="button" class="btn-page" style="padding:2px 6px; font-size:0.75rem;" onclick="updateCartQuantity('${it.productId}', 1)">+</button>
+            </div>
+          </td>
+          <td style="text-align:right; font-weight:700; color:#10b981;">R$ ${subtotal},00</td>
+          <td style="text-align:center;">
+            <button type="button" class="btn-toggle-pass" style="color:#f87171; font-size:0.85rem;" onclick="removeFromCart('${it.productId}')" title="Remover item">✕</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // 7. Recálculo Financeiro em Tempo Real
+    function recalculateTotals() {
+      const grossTotal = pdvState.cart.reduce((acc, it) => acc + (it.quantity * it.price), 0);
+      const isDiscountChecked = document.getElementById('checkApplyDiscount').checked;
+      const clientPoints = pdvState.client ? pdvState.client.loyaltyPoints : 0;
+
+      let discount = 0;
+      let pointsUsed = 0;
+
+      if (isDiscountChecked && clientPoints >= 100 && grossTotal > 0) {
+        discount = Math.floor(grossTotal * 0.10);
+        pointsUsed = 100;
+      }
+
+      const finalTotal = Math.max(0, grossTotal - discount);
+      const pointsEarned = Math.floor(finalTotal / 10);
+      const pointsAfter = clientPoints - pointsUsed + pointsEarned;
+
+      // Atualiza interface financeira
+      document.getElementById('grossTotalDisplay').textContent = `R$ ${grossTotal},00`;
+      document.getElementById('discountDisplay').textContent = discount > 0 ? `- R$ ${discount},00` : `R$ 0,00`;
+      document.getElementById('finalTotalDisplay').textContent = `R$ ${finalTotal},00`;
+
+      // Atualiza breakdown de fidelidade
+      document.getElementById('pointsBeforeLabel').textContent = `${clientPoints} pts`;
+      document.getElementById('pointsUsedLabel').textContent = pointsUsed > 0 ? `- ${pointsUsed} pts` : `0 pts`;
+      document.getElementById('pointsEarnedLabel').textContent = `+ ${pointsEarned} pts`;
+      document.getElementById('pointsAfterLabel').textContent = `${pointsAfter} pts`;
+    }
+
+    // 8. Finalização da Venda (POST /api/v1/sales)
+    async function handleSubmitSale(forcedIdempotencyKey = null) {
+      const key = forcedIdempotencyKey || pdvState.currentIdempotencyKey;
+      const paymentMethod = document.getElementById('paymentMethodSelect').value;
+      const isDiscountChecked = document.getElementById('checkApplyDiscount').checked;
+      const discount = isDiscountChecked ? 10 : 0;
+
+      const clientId = pdvState.client ? pdvState.client.id : null;
+      const items = pdvState.cart.map(it => ({
+        productId: it.productId,
+        quantity: it.quantity
+      }));
+
+      pdvState.lastExecutionPayload = { clientId, paymentMethod, discount, items };
+
+      const startTime = performance.now();
+      const result = await Api.createSale(pdvState.lastExecutionPayload, key);
+      const duration = Math.round(performance.now() - startTime);
+      const isReplayed = Boolean(result.idempotencyReplayed || result.isReplayed);
+
+      updateSaleTechConsole(
+        result.status,
+        result.ok ? (isReplayed ? '201 Created (Replay)' : '201 Created') : 'Erro',
+        result.requestId,
+        key,
+        isReplayed,
+        result.ok ? 'NENHUM ERRO' : (result.error ? result.error.code : 'ERROR'),
+        duration,
+        result.ok ? 'Venda registrada com sucesso no banco de dados.' : (result.error ? result.error.detail : 'Falha na requisição.')
+      );
+
+      if (!result.ok) {
+        renderSaleRfcError(result.error, result.status);
+      } else {
+        pdvState.lastCreatedSale = result.data;
+        Session.setLastSale(result.data);
+
+        // Ativa o botão de replay de idempotência
+        const replayBtn = document.getElementById('btnReplayIdempotency');
+        replayBtn.disabled = false;
+        replayBtn.textContent = `🔄 Reenviar Mesma Requisição (${key.substring(0, 15)}...)`;
+
+        // Atualiza o quadro comparativo Antes vs Depois
+        renderAuditComparison(result.beforeState, result.afterState, result.data);
+
+        // Atualiza estoque local do catálogo e fidelidade do cliente
+        await loadCatalog();
+        if (pdvState.client) {
+          const freshClientRes = await Api.getClientById(pdvState.client.id);
+          if (freshClientRes.ok) setClient(freshClientRes.data);
+        }
+
+        // Abre o modal de recibo
+        openReceiptModal(result.data, result.location);
+      }
+    }
+
+    // 9. Replay com a mesma Chave de Idempotência (Demonstração Obrigatória)
+    async function handleReplaySameIdempotencyKey() {
+      if (!pdvState.lastExecutionPayload) return;
+      await handleSubmitSale(pdvState.currentIdempotencyKey);
+    }
+
+    // 10. Quadro Comparativo (Antes vs Depois)
+    function renderAuditComparison(before, after, sale) {
+      if (!before || !after) return;
+
+      const beforeDiv = document.getElementById('auditBeforeContent');
+      const afterDiv = document.getElementById('auditAfterContent');
+
+      let productsBeforeHtml = (before.products || []).map(p => `• <strong>${p.title}:</strong> ${p.stock} un`).join('<br>');
+      let productsAfterHtml = (after.products || []).map(p => `• <strong>${p.title}:</strong> ${p.stock} un`).join('<br>');
+
+      beforeDiv.innerHTML = `
+        <div style="margin-bottom:6px;"><strong>Estoque Físico:</strong><br>${productsBeforeHtml}</div>
+        <div><strong>Saldo de Fidelidade:</strong> ${before.clientPoints} pontos</div>
+      `;
+
+      afterDiv.innerHTML = `
+        <div style="margin-bottom:6px;"><strong>Novo Estoque (Baixado):</strong><br>${productsAfterHtml}</div>
+        <div><strong>Novo Saldo Fidelidade:</strong> ${after.clientPoints} pontos
+          <span style="font-size:0.75rem;">(${after.pointsUsed > 0 ? '-' + after.pointsUsed + ' resgatados, ' : ''}+${after.pointsEarned} ganhos)</span>
+        </div>
+        <div style="margin-top:4px;"><strong>Desconto Concedido:</strong> R$ ${after.discountApplied},00</div>
+      `;
+    }
+
+    // 11. Modal de Recibo da Venda
+    function openReceiptModal(sale, location) {
+      document.getElementById('receiptSaleId').textContent = sale.id;
+      document.getElementById('receiptLocation').textContent = location || `/api/v1/sales/${sale.id}`;
+
+      let dateFormatted = sale.createdAt;
+      try {
+        const d = new Date(sale.createdAt);
+        if (!isNaN(d.getTime())) {
+          dateFormatted = d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR');
+        }
+      } catch (e) {}
+      document.getElementById('receiptDate').textContent = dateFormatted;
+
+      document.getElementById('receiptClientName').textContent = sale.clientName;
+      document.getElementById('receiptSellerName').textContent = `${sale.sellerName} (${sale.sellerId})`;
+
+      const tbody = document.getElementById('receiptItemsBody');
+      tbody.innerHTML = '';
+      (sale.items || []).forEach(it => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${it.title}</strong></td>
+          <td style="text-align:center;">${it.quantity}</td>
+          <td style="text-align:right;">R$ ${it.unitPrice},00</td>
+          <td style="text-align:right; font-weight:700;">R$ ${it.subtotal || (it.quantity * it.unitPrice)},00</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('receiptGrossTotal').textContent = `R$ ${sale.grossTotal},00`;
+      document.getElementById('receiptDiscount').textContent = sale.discount > 0 ? `- R$ ${sale.discount},00` : `R$ 0,00`;
+      document.getElementById('receiptFinalTotal').textContent = `R$ ${sale.finalTotal},00`;
+
+      document.getElementById('saleReceiptModal').classList.remove('hidden');
+    }
+
+    function closeReceiptModal() {
+      document.getElementById('saleReceiptModal').classList.add('hidden');
+    }
+
+    function resetSaleForm() {
+      pdvState.currentIdempotencyKey = generateIdempotencyKey();
+      document.getElementById('saleTechIdempotencyKey').textContent = pdvState.currentIdempotencyKey;
+      clearCart();
+    }
+
+    function goToClientHistory() {
+      if (pdvState.client) {
+        Session.setSelectedClient(pdvState.client);
+      }
+      window.location.href = '05_historico.html';
+    }
+
+    // 12. Modal de Seleção de Cliente
+    function openClientSelectionModal() {
+      searchClientsForModal();
+      document.getElementById('selectClientModal').classList.remove('hidden');
+    }
+
+    function closeClientSelectionModal() {
+      document.getElementById('selectClientModal').classList.add('hidden');
+    }
+
+    async function searchClientsForModal() {
+      const q = document.getElementById('clientSearchModalInput').value.trim();
+      const container = document.getElementById('clientSearchResultsContainer');
+      container.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:10px;">Buscando clientes...</div>`;
+
+      const res = await Api.getClients({ page: 1, limit: 10, search: q });
+      if (res.ok && res.data) {
+        container.innerHTML = '';
+        const list = (res.data && Array.isArray(res.data.data)) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+        if (list.length === 0) {
+          container.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:10px;">Nenhum cliente localizado.</div>`;
+          return;
+        }
+
+        list.forEach(c => {
+          const div = document.createElement('div');
+          div.style.background = '#0f172a';
+          div.style.border = '1px solid #1e293b';
+          div.style.borderRadius = '6px';
+          div.style.padding = '8px 12px';
+          div.style.display = 'flex';
+          div.style.justifyContent = 'space-between';
+          div.style.alignItems = 'center';
+          div.style.cursor = 'pointer';
+
+          div.innerHTML = `
+            <div>
+              <div style="font-weight:700; color:#f8fafc; font-size:0.88rem;">${c.name}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">
+                CPF: ${formatCpf(c.cpf)} &bull; Saldo: <strong style="color:#f59e0b;">${c.loyaltyPoints} pts</strong>
+              </div>
+            </div>
+            <button type="button" class="btn-page" style="padding:4px 8px; font-size:0.75rem;">Selecionar</button>
+          `;
+          div.onclick = () => {
+            setClient(c);
+            Session.setSelectedClient(c);
+            closeClientSelectionModal();
+          };
+          container.appendChild(div);
+        });
+      }
+    }
+
+    // 13. Console Técnico de Observabilidade REST
+    function updateSaleTechConsole(statusNum, statusTitle, reqId, idemKey, isReplayed, rfcCode, durationMs, detailMsg) {
+      const badge = document.getElementById('saleTechStatusBadge');
+      const statusElem = document.getElementById('saleTechHttpStatus');
+      const detailElem = document.getElementById('saleTechStatusDetail');
+      const idemElem = document.getElementById('saleTechIdempotencyKey');
+      const replayedElem = document.getElementById('saleTechReplayedDisplay');
+      const reqIdElem = document.getElementById('saleTechRequestId');
+      const rfcCodeElem = document.getElementById('saleTechRfcCode');
+      const timeElem = document.getElementById('saleTechResponseTime');
+      const explanationBox = document.getElementById('saleReplayExplanationBox');
+
+      statusElem.textContent = `HTTP ${statusNum} ${statusTitle}`;
+      detailElem.textContent = detailMsg;
+      idemElem.textContent = idemKey;
+      reqIdElem.textContent = reqId;
+      rfcCodeElem.textContent = rfcCode;
+      timeElem.textContent = `${durationMs} ms`;
+
+      if (isReplayed) {
+        replayedElem.textContent = 'true (Replayed do Cache)';
+        replayedElem.style.color = '#f59e0b';
+        explanationBox.classList.remove('hidden');
+      } else {
+        replayedElem.textContent = 'false (Nova Venda Registrada)';
+        replayedElem.style.color = '#10b981';
+        explanationBox.classList.add('hidden');
+      }
+
+      if (statusNum >= 200 && statusNum < 300) {
+        badge.className = 'role-badge';
+        badge.style.background = '#064e3b';
+        badge.style.borderColor = '#059669';
+        badge.style.color = '#6ee7b7';
+        badge.textContent = `${statusNum} ${statusTitle}`;
+        statusElem.style.color = '#10b981';
+        rfcCodeElem.style.color = '#38bdf8';
+      } else {
+        badge.className = 'role-badge';
+        badge.style.background = '#7f1d1d';
+        badge.style.borderColor = '#dc2626';
+        badge.style.color = '#fca5a5';
+        badge.textContent = `${statusNum} ${rfcCode}`;
+        statusElem.style.color = '#f87171';
+        rfcCodeElem.style.color = '#f87171';
+      }
+    }
+
+    function renderSaleRfcError(problemJson, httpStatus) {
+      const box = document.getElementById('saleRfcErrorBox');
+      const tag = document.getElementById('saleRfcStatusTag');
+      const json = document.getElementById('saleRfcErrorJson');
+
+      tag.textContent = `${httpStatus} ${problemJson.code || ''}`;
+      json.textContent = JSON.stringify(problemJson, null, 2);
+      box.classList.remove('hidden');
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // 14. Presets de Demonstração em 1 Clique (Banca P2)
+    async function quickDemoSale(scenario) {
+      if (scenario === 'valid_sale') {
+        await initClient();
+        clearCart();
+        addToCart('KIYBXACS6uVj5DbKEsPQ', 1); // Duna (R$ 80)
+        addToCart('PRD2c7Q4TCYGcsuPch88', 1); // O Príncipe Cruel (R$ 60)
+        document.getElementById('checkApplyDiscount').checked = false;
+        recalculateTotals();
+        setTimeout(() => handleSubmitSale(), 400);
+      } else if (scenario === 'discount_sale') {
+        const res = await Api.getClientById('8NV1c7Q4TCYGcsuPch8I'); // Ana Souza (100 pts)
+        if (res.ok && res.data) setClient(res.data);
+        clearCart();
+        addToCart('KIYBXACS6uVj5DbKEsPQ', 1); // Duna (R$ 80)
+        addToCart('PRD2c7Q4TCYGcsuPch88', 1); // O Príncipe Cruel (R$ 60)
+        document.getElementById('checkApplyDiscount').checked = true;
+        recalculateTotals();
+        setTimeout(() => handleSubmitSale(), 400);
+      } else if (scenario === 'test_idempotency') {
+        if (!pdvState.lastCreatedSale) {
+          await quickDemoSale('valid_sale');
+          setTimeout(() => handleReplaySameIdempotencyKey(), 800);
+        } else {
+          handleReplaySameIdempotencyKey();
+        }
+      } else if (scenario === 'error_stock') {
+        clearCart();
+        addToCart('KIYBXACS6uVj5DbKEsPQ', 50); // Duna só tem 5 un
+        recalculateTotals();
+        setTimeout(() => handleSubmitSale(), 300);
+      } else if (scenario === 'error_no_client') {
+        setClient(null);
+        clearCart();
+        addToCart('KIYBXACS6uVj5DbKEsPQ', 1);
+        recalculateTotals();
+        setTimeout(() => handleSubmitSale(), 300);
+      } else if (scenario === 'error_empty_cart') {
+        clearCart();
+        recalculateTotals();
+        setTimeout(() => handleSubmitSale(), 300);
+      }
+    }
+
+    // Inicialização da Tela
+    initSellerFromSession();
+    initClient();
+    loadCatalog();
+    document.getElementById('saleTechIdempotencyKey').textContent = pdvState.currentIdempotencyKey;
+  </script>
+</body>
+</html>
